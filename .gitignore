@@ -1,0 +1,7 @@
+.b2b-workspace/
+
+# B2B demo environment config — contains credentials
+demo.env
+
+# macOS metadata
+.DS_Store
