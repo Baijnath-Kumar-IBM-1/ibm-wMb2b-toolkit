@@ -1,11 +1,20 @@
-# B2B Trace Demo — Quick Start Guide
+# IBM webMethods B2B Toolkit
 
-A single shell script that provisions IBM webMethods B2B SaaS assets and
-submits complete multi-document EDI trace sequences for three domains:
-**Retail**, **Healthcare**, and **Supply Chain Logistics**.
+A single-script toolkit for IBM webMethods B2B SaaS. Use `--feature` to select
+the capability you need. All configuration lives in `toolkit.env` — the script
+itself is never edited.
 
-Designed for PM, Sales, and Marketing demos of the B2B transaction linking
-use-case.
+Designed for PM, Sales, and Marketing demos of B2B SaaS capabilities including
+partner provisioning and multi-document EDI transaction tracing.
+
+---
+
+## Features
+
+| `--feature` | What it does |
+|-------------|--------------|
+| `setup` | Provisions B2B assets for a domain — trading partners, HTTP-IN channels, partner users, and EDI document types. Idempotent: safe to run multiple times against the same instance. |
+| `trace` | Provisions assets (if not already done) then submits a complete, linked multi-document EDI trace sequence for the chosen domain. |
 
 ---
 
@@ -20,8 +29,8 @@ use-case.
 > **macOS users**: the system `bash` is version 3. Install bash 5 via Homebrew:
 > ```bash
 > brew install bash
-> # Then run the script explicitly with the newer bash:
-> /opt/homebrew/opt/bash/bin/bash demo.sh --domain retail
+> # Then run the script with the newer bash:
+> /opt/homebrew/opt/bash/bin/bash b2b-toolkit.sh --feature setup --domain retail
 > ```
 > Or update your PATH so `/opt/homebrew/opt/bash/bin` comes first.
 
@@ -29,15 +38,15 @@ use-case.
 
 ## Configuration
 
-**Never edit `demo.sh`** — all configuration lives in `demo.env`.
+**Never edit `b2b-toolkit.sh`** — all configuration lives in `toolkit.env`.
 
 ```bash
 # One-time setup: copy the example file and fill in your values
-cp demo.env.example demo.env
-# Now edit demo.env with your B2B instance details
+cp toolkit.env.example toolkit.env
+# Now edit toolkit.env with your B2B instance details
 ```
 
-Open `demo.env` in any text editor and set:
+Open `toolkit.env` in any text editor and set:
 
 | Variable | Description |
 |----------|-------------|
@@ -48,12 +57,7 @@ Open `demo.env` in any text editor and set:
 | `HEALTHCARE_*` | Healthcare domain partner identity and credentials |
 | `SUPPLY_CHAIN_*` | Supply chain domain partner identity and credentials |
 
-> **Important**: `B2B_HOST` is the **B2B server hostname**, not your local
-> machine hostname. It is used to scope the workspace directory so running the
-> same script against two different B2B instances creates two independent
-> workspaces.
->
-> **`demo.env` is in `.gitignore`** — it will never be committed accidentally.
+> `toolkit.env` is in `.gitignore` — it will never be committed accidentally.
 > The safe-to-commit template is `demo.env.example`.
 
 ---
@@ -62,30 +66,78 @@ Open `demo.env` in any text editor and set:
 
 ```bash
 # Make executable (once)
-chmod +x demo.sh
+chmod +x b2b-toolkit.sh
 
-# Full retail trace — provisions all assets, submits 9 documents
-./demo.sh --domain retail
+# ── feature: setup ─────────────────────────────────────────────────────────
+# Provision all B2B assets for a domain (partners, channels, doc types)
+./b2b-toolkit.sh --feature setup --domain retail
+./b2b-toolkit.sh --feature setup --domain healthcare
+./b2b-toolkit.sh --feature setup --domain supply_chain
+
+# ── feature: trace ─────────────────────────────────────────────────────────
+# Full retail EDI trace — provision assets (if needed) + submit 9 documents
+./b2b-toolkit.sh --feature trace --domain retail
 
 # Full healthcare trace
-./demo.sh --domain healthcare
+./b2b-toolkit.sh --feature trace --domain healthcare
 
 # Full supply chain trace
-./demo.sh --domain supply_chain
+./b2b-toolkit.sh --feature trace --domain supply_chain
 
-# Run all three domains back-to-back in one command
-./demo.sh --all-domains
+# Run all three trace domains back-to-back
+./b2b-toolkit.sh --feature trace --all-domains
 ```
 
-On the **first run** for each domain, the script automatically:
-1. Creates two trading partners with domain-specific DUNS identities
-2. Creates an HTTP-IN channel and associates it to Partner 1
-3. Creates a partner user and associates them to Partner 1
-4. Installs all required EDI document types for the domain
-5. Submits the complete document sequence with consistent linking attributes
+---
 
-On **subsequent runs**, assets are already provisioned — the script skips
-setup and goes straight to submitting a fresh trace with new reference numbers.
+## Feature Reference
+
+### `--feature setup`
+
+Provisions all B2B assets required for a domain:
+1. Creates two trading partners with domain-specific DUNS identities
+2. Creates HTTP-IN channels and associates them to each partner
+3. Creates partner users and associates them to their partners
+4. Installs all required EDI document types for the domain
+
+The operation is **idempotent** — re-running it on an already-provisioned
+domain is safe and skips work that was already completed.
+
+```bash
+./b2b-toolkit.sh --feature setup --domain retail
+./b2b-toolkit.sh --feature setup --domain healthcare
+./b2b-toolkit.sh --feature setup --domain supply_chain
+```
+
+---
+
+### `--feature trace`
+
+Submits a complete linked EDI document sequence to demonstrate B2B transaction
+tracing. Automatically provisions assets first if they are not present.
+
+```bash
+# Full trace (provision if needed + submit all documents)
+./b2b-toolkit.sh --feature trace --domain retail
+
+# Submit only (assets already provisioned via --feature setup)
+./b2b-toolkit.sh --feature trace --domain retail --submit-only
+
+# Dry run — render and print all EDI templates, no API calls
+./b2b-toolkit.sh --feature trace --domain retail --dry-run
+
+# Submit only specific transaction codes
+./b2b-toolkit.sh --feature trace --domain retail --submit-only --docs 840,843,850
+
+# Custom delay between document submissions (default: 2 seconds)
+./b2b-toolkit.sh --feature trace --domain retail --delay 5
+
+# Run all three domains in sequence
+./b2b-toolkit.sh --feature trace --all-domains
+
+# All domains — dry run
+./b2b-toolkit.sh --feature trace --all-domains --dry-run
+```
 
 ---
 
@@ -101,7 +153,7 @@ and **PreferredSupplier** (supplier):
        → 810 Invoice → 820 Payment
 ```
 
-**Linking attribute**: `RFQNumber` (840 → 843, 850) · `PONumber` (850 → 855, 860, 856, 810) · `InvoiceNumber` (810 → 820)
+**Linking attributes**: `RFQNumber` · `PONumber` · `InvoiceNumber`
 
 ---
 
@@ -113,7 +165,7 @@ and **HealthcareProvider**:
 837 Claim → 275 Claim Attachments → 277 Claim Status → 835 Remittance → 820 Payment
 ```
 
-**Linking attribute**: `ClaimID` (837 → 275, 277) · `TRN_Ref` (275 → 277 → 835) · `RemittanceTrace` (835 → 820)
+**Linking attributes**: `ClaimID` · `TRN_Ref` · `RemittanceTrace`
 
 ---
 
@@ -126,56 +178,56 @@ and **SCL-Carrier**:
               → 210 Freight Invoice → 820 Payment
 ```
 
-**Linking attribute**: `ShipmentID` (204 → 990 → 211 → 214) · `SCInvoiceNumber` (210 → 820)
+**Linking attributes**: `ShipmentID` · `SCInvoiceNumber`
 
 ---
 
 ## All Commands
 
 ```bash
-# Full trace (provision + submit all documents)
-./demo.sh --domain retail
+# Provision assets for a domain
+./b2b-toolkit.sh --feature setup --domain retail
 
-# Provision B2B assets only, no document submission
-./demo.sh --domain retail --setup-only
+# Full trace (provision + submit all documents)
+./b2b-toolkit.sh --feature trace --domain retail
 
 # Submit documents only (assets must already be provisioned)
-./demo.sh --domain retail --submit-only
+./b2b-toolkit.sh --feature trace --domain retail --submit-only
 
 # Dry run — render and print all EDI templates, no API calls
-./demo.sh --domain retail --dry-run
+./b2b-toolkit.sh --feature trace --domain retail --dry-run
 
 # Submit only specific transaction codes
-./demo.sh --domain retail --submit-only --docs 840,843,850
+./b2b-toolkit.sh --feature trace --domain retail --submit-only --docs 840,843,850
 
 # Custom delay between document submissions (default: 2 seconds)
-./demo.sh --domain retail --delay 5
+./b2b-toolkit.sh --feature trace --domain retail --delay 5
 
-# Run all three domains in sequence (provisions each if needed)
-./demo.sh --all-domains
+# Run all three domains in sequence
+./b2b-toolkit.sh --feature trace --all-domains
 
-# All domains — dry run (safe preview, no API calls)
-./demo.sh --all-domains --dry-run
+# All domains — dry run
+./b2b-toolkit.sh --feature trace --all-domains --dry-run
 
 # List all domains and their workspace status for the current B2B host
-./demo.sh --list-domains
+./b2b-toolkit.sh --list-domains
 
 # Show full workspace state for a domain
-./demo.sh --status retail
+./b2b-toolkit.sh --status retail
 
 # Reset workspace for a domain (re-provisions from scratch on next run)
-./demo.sh --reset retail
+./b2b-toolkit.sh --reset retail
 ```
 
 ---
 
 ## Workspace Files
 
-The script tracks all provisioned asset IDs, run counters, and control numbers
+The toolkit tracks all provisioned asset IDs, run counters, and control numbers
 in a workspace directory scoped to the B2B host:
 
 ```
-.b2b-workspace/
+.b2b-toolkit/
   dev2205134-m-yqb-c1-b2b-ipaas-dev/    ← sanitized from B2B_HOST
     retail.json
     retail_runs.log
@@ -197,12 +249,12 @@ self-describing if you need to inspect it manually.
 |---------|----------|
 | `jq: command not found` | Install jq: `brew install jq` or `apt install jq` |
 | `declare -A: invalid option` | You are using bash 3 (macOS default). Install bash 4+: `brew install bash` |
-| `Token request failed` | Check `MCSP_API_KEY` and `MCSP_INSTANCE_ID` in `demo.env` |
+| `Token request failed` | Check `MCSP_API_KEY` and `MCSP_INSTANCE_ID` in `toolkit.env` |
 | `Document type already installed` | Normal — the script fetches the existing ID via GET and continues |
 | `HTTP 401 on document POST` | Partner user credentials may be wrong. Run `--reset <domain>` and re-provision |
 | Assets were already created manually | Run `--status <domain>` to check state, or `--reset <domain>` to start fresh |
-| Want to submit a second trace on the same host | Just run `./demo.sh --domain retail` again — a new unique trace will be submitted |
-| macOS `declare -A: invalid option` | System bash is v3. Run: `brew install bash` then use `/opt/homebrew/opt/bash/bin/bash demo.sh ...` |
+| Want to submit a second trace | Just run `./b2b-toolkit.sh --feature trace --domain retail` again — a new unique trace will be submitted |
+| macOS `declare -A: invalid option` | System bash is v3. Run: `brew install bash` then use `/opt/homebrew/opt/bash/bin/bash b2b-toolkit.sh ...` |
 
 ---
 
@@ -210,8 +262,8 @@ self-describing if you need to inspect it manually.
 
 | Domain | Partner 1 | DUNS | Partner 2 | DUNS |
 |--------|-----------|------|-----------|------|
-| retail | AcmeIndustries | 777888999 | PreferredSupplier | 777444111 |
-| healthcare | HealthcarePayer | 9012345720000 | HealthcareProvider | 9088877320000 |
+| retail | AcmeIndustries | 777888900 | PreferredSupplier | 777444100 |
+| healthcare | HealthcarePayer | 9012345330000 | HealthcareProvider | 9088877440000 |
 | supply_chain | SCL-Shipper | 8811223344000 | SCL-Carrier | 8899776655000 |
 
 All DUNS IDs are globally unique across domains to prevent identity conflicts.

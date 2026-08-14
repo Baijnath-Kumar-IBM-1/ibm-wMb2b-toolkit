@@ -1,41 +1,40 @@
 #!/usr/bin/env bash
 ################################################################################
-# B2B Trace Demo Script
-# A single-file, self-contained script to provision B2B assets and submit
-# multi-document EDI trace sequences for retail, healthcare, and supply-chain
-# demonstration scenarios.
+# IBM webMethods B2B Toolkit
 #
-# Configuration is read from demo.env in the same directory as this script.
-# Do NOT edit this script — edit demo.env instead.
+# A single-file toolkit for IBM webMethods B2B SaaS. Use --feature to select
+# the capability you need:
+#
+#   setup   — Provision B2B assets (partners, channels, users, document types)
+#             for a given domain. Idempotent — safe to run multiple times.
+#
+#   trace   — Provision assets (if needed) and submit a complete multi-document
+#             EDI trace sequence for retail, healthcare, or supply-chain demos.
+#
+# Configuration lives entirely in toolkit.env — never edit this script.
 ################################################################################
 
 set -euo pipefail
 
 ################################################################################
 # LOAD ENVIRONMENT CONFIG
-# All user-configurable values live in demo.env — this script never needs
-# to be edited directly.
 ################################################################################
 
-# Resolve the directory containing this script so demo.env is found
-# regardless of the working directory from which the script is invoked.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/demo.env"
+ENV_FILE="${SCRIPT_DIR}/toolkit.env"
+
 
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "[ERROR] Configuration file not found: $ENV_FILE" >&2
-    echo "        Copy demo.env.example to demo.env and fill in your values." >&2
+    echo "        Copy toolkit.env.example to toolkit.env and fill in your values." >&2
     exit 1
 fi
 
-# Source the env file — exports all key=value pairs into the current shell.
-# shellcheck source=demo.env
-set +u   # allow unset vars briefly while sourcing
+set +u
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set -u
 
-# Validate the three mandatory variables are present and non-empty.
 for _required_var in B2B_HOST MCSP_INSTANCE_ID MCSP_API_KEY; do
     if [[ -z "${!_required_var:-}" ]]; then
         echo "[ERROR] Required variable '$_required_var' is not set in $ENV_FILE" >&2
@@ -55,24 +54,16 @@ POST_PAYLOAD_TIMEOUT=120
 # UTILITY FUNCTIONS
 ################################################################################
 
-# Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-#######################################
-# Log message with color and level
-# Arguments:
-#   $1 - Log level (INFO, WARN, ERROR, SUCCESS)
-#   $2 - Message
-#######################################
 log() {
     local level="$1"
     local message="$2"
     local color=""
-
     case "$level" in
         INFO)    color="$BLUE"   ;;
         WARN)    color="$YELLOW" ;;
@@ -80,22 +71,12 @@ log() {
         SUCCESS) color="$GREEN"  ;;
         *)       color="$NC"     ;;
     esac
-
     echo -e "${color}[$level]${NC} $message" >&2
 }
 
-#######################################
-# Extract JSON value using jq
-# Arguments:
-#   $1 - JSON string
-#   $2 - jq path (e.g., ".internalId")
-# Returns:
-#   Extracted value or empty string
-#######################################
 extract_json_value() {
     local json="$1"
     local path="$2"
-
     if command -v jq &> /dev/null; then
         echo "$json" | jq -r "$path" 2>/dev/null || echo ""
     else
@@ -104,14 +85,7 @@ extract_json_value() {
     fi
 }
 
-#######################################
-# Check if required tools are installed.
-# Also verifies bash >= 4 (required for associative arrays).
-# Returns:
-#   0 if all requirements are met, 1 otherwise
-#######################################
 check_dependencies() {
-    # Bash 4+ is required for associative arrays (declare -A).
     if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
         log "ERROR" "bash 4 or higher is required (found ${BASH_VERSION})."
         log "ERROR" "On macOS, install a newer bash with: brew install bash"
@@ -120,19 +94,11 @@ check_dependencies() {
     fi
 
     local missing_tools=()
-
-    if ! command -v curl &> /dev/null; then
-        missing_tools+=("curl")
-    fi
-
-    if ! command -v jq &> /dev/null; then
-        missing_tools+=("jq")
-    fi
+    command -v curl &> /dev/null || missing_tools+=("curl")
+    command -v jq   &> /dev/null || missing_tools+=("jq")
 
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         log "ERROR" "Missing required tools: ${missing_tools[*]}"
-        log "ERROR" "Please install missing tools before running this script"
-        echo ""
         echo "Installation instructions:"
         echo "  macOS:         brew install ${missing_tools[*]}"
         echo "  Ubuntu/Debian: sudo apt-get install ${missing_tools[*]}"
@@ -144,78 +110,11 @@ check_dependencies() {
     return 0
 }
 
-#######################################
-# Make HTTP request with error handling
-# Arguments:
-#   $1 - HTTP method (GET, POST, PUT, DELETE)
-#   $2 - URL
-#   $3 - Headers (newline-separated)
-#   $4 - Body (optional)
-#   $5 - Timeout (optional, default: 30)
-#   $6 - Auth (optional, format: "username:password")
-# Returns:
-#   HTTP response body; exits non-zero on HTTP error
-#######################################
-make_http_request() {
-    local method="$1"
-    local url="$2"
-    local headers="$3"
-    local body="${4:-}"
-    local timeout="${5:-30}"
-    local auth="${6:-}"
-
-    local curl_cmd="curl -s -w '\n%{http_code}' -X $method --max-time $timeout"
-
-    # Add headers
-    if [[ -n "$headers" ]]; then
-        while IFS= read -r header; do
-            [[ -n "$header" ]] && curl_cmd="$curl_cmd -H '$header'"
-        done <<< "$headers"
-    fi
-
-    # Add authentication
-    if [[ -n "$auth" ]]; then
-        curl_cmd="$curl_cmd -u '$auth'"
-    fi
-
-    # Add body
-    if [[ -n "$body" ]]; then
-        curl_cmd="$curl_cmd -d '$body'"
-    fi
-
-    curl_cmd="$curl_cmd '$url'"
-
-    log "INFO" "Executing: $method $url"
-
-    local response
-    response=$(eval $curl_cmd)
-    local http_code
-    http_code=$(echo "$response" | tail -n1)
-    local response_body
-    response_body=$(echo "$response" | sed '$d')
-
-    log "INFO" "HTTP Status Code: $http_code"
-
-    if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
-        log "SUCCESS" "Request successful"
-        echo "$response_body"
-        return 0
-    else
-        log "ERROR" "Request failed with status code: $http_code"
-        log "ERROR" "Response: $response_body"
-        echo "$response_body"
-        return 1
-    fi
-}
-
-#######################################
-# Display banner
-#######################################
 display_banner() {
     echo -e "${BLUE}"
     echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║              B2B Trace Demo Script                         ║"
-    echo "║         Multi-Domain EDI Trace Submission Tool             ║"
+    echo "║           IBM webMethods B2B Toolkit                       ║"
+    echo "║      Multi-Feature EDI & B2B Asset Management Tool        ║"
     echo "╚════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     log "INFO" "Host:     $B2B_HOST"
@@ -226,53 +125,30 @@ display_banner() {
 # WORKSPACE STATE MANAGEMENT
 ################################################################################
 
-# Workspace shell variables — populated by load_workspace(), consumed by
-# save_workspace() and is_asset_provisioned().
+WORKSPACE_ROOT=".b2b-toolkit"
+
 WS_PARTNER1_INTERNAL_ID=""
 WS_PARTNER2_INTERNAL_ID=""
-# P1 channel
 WS_CHANNEL_ID=""
 WS_CHANNEL_ENDPOINT_URI=""
 WS_PARTNER_USER_ID=""
-# P2 channel (dual-channel: one channel per partner for correct ISA06 routing)
 WS_P2_CHANNEL_ID=""
 WS_P2_CHANNEL_ENDPOINT_URI=""
 WS_P2_PARTNER_USER_ID=""
 WS_RUN_COUNT=0
 WS_ISA_CTRL_NUM=1
 WS_GS_CTRL_NUM=1
-# WS_DOCTYPE_IDS is an associative array declared inside load_workspace()
-# because declare -A requires bash 4+ (enforced by check_dependencies).
 
-#######################################
-# Resolve workspace directory and file path for a given domain.
-# Sets globals:
-#   WORKSPACE_DIR  — .b2b-workspace/<sanitized-hostname>
-#   WORKSPACE_FILE — $WORKSPACE_DIR/<domain>.json
-# Arguments:
-#   $1 - domain (retail | healthcare | supply_chain)
-#######################################
 resolve_workspace_path() {
     local domain="$1"
-
-    # Sanitize the B2B hostname: dots → dashes, force lowercase.
-    # Use B2B_HOST (the config variable) not the shell builtin $HOSTNAME.
     local sanitized_host
     sanitized_host=$(echo "$B2B_HOST" | tr '.' '-' | tr '[:upper:]' '[:lower:]')
-
-    WORKSPACE_DIR=".b2b-workspace/${sanitized_host}"
+    WORKSPACE_DIR="${WORKSPACE_ROOT}/${sanitized_host}"
     WORKSPACE_FILE="${WORKSPACE_DIR}/${domain}.json"
-
     log "INFO" "Workspace directory : $WORKSPACE_DIR"
     log "INFO" "Workspace file      : $WORKSPACE_FILE"
 }
 
-#######################################
-# Load workspace state from disk into shell variables.
-# Must be called after resolve_workspace_path().
-# Arguments:
-#   $1 - domain
-#######################################
 load_workspace() {
     local domain="$1"
 
@@ -288,16 +164,12 @@ load_workspace() {
         WS_P2_CHANNEL_ENDPOINT_URI=$(jq -r '.assets.p2_channel_endpoint_uri // ""' "$WORKSPACE_FILE")
         WS_P2_PARTNER_USER_ID=$(     jq -r '.assets.p2_partner_user_id      // ""' "$WORKSPACE_FILE")
 
-        WS_RUN_COUNT=$(     jq -r '.counters.run_count          // 0' "$WORKSPACE_FILE")
-        WS_ISA_CTRL_NUM=$(  jq -r '.counters.isa_control_number // 1' "$WORKSPACE_FILE")
-        WS_GS_CTRL_NUM=$(   jq -r '.counters.gs_control_number  // 1' "$WORKSPACE_FILE")
-        # Ensure control numbers are always at least 1 (a workspace saved before
-        # any submission may have stored 0).
+        WS_RUN_COUNT=$(    jq -r '.counters.run_count          // 0' "$WORKSPACE_FILE")
+        WS_ISA_CTRL_NUM=$( jq -r '.counters.isa_control_number // 1' "$WORKSPACE_FILE")
+        WS_GS_CTRL_NUM=$(  jq -r '.counters.gs_control_number  // 1' "$WORKSPACE_FILE")
         [[ "$WS_ISA_CTRL_NUM" -lt 1 ]] && WS_ISA_CTRL_NUM=1
         [[ "$WS_GS_CTRL_NUM"  -lt 1 ]] && WS_GS_CTRL_NUM=1
 
-        # Populate the associative array from assets.document_type_ids object.
-        # jq outputs tab-separated KEY VALUE lines; bash reads them into the map.
         declare -gA WS_DOCTYPE_IDS=()
         while IFS=$'\t' read -r key value; do
             [[ -n "$key" && "$key" != "null" ]] && WS_DOCTYPE_IDS["$key"]="$value"
@@ -305,7 +177,6 @@ load_workspace() {
 
         log "SUCCESS" "Workspace loaded for host: $B2B_HOST, domain: $domain"
     else
-        # Fresh start — initialise all variables to safe defaults.
         WS_PARTNER1_INTERNAL_ID=""
         WS_PARTNER2_INTERNAL_ID=""
         WS_CHANNEL_ID=""
@@ -318,26 +189,14 @@ load_workspace() {
         WS_ISA_CTRL_NUM=1
         WS_GS_CTRL_NUM=1
         declare -gA WS_DOCTYPE_IDS=()
-
         log "INFO" "No workspace found — fresh start for host: $B2B_HOST, domain: $domain"
     fi
 }
 
-#######################################
-# Persist current shell-variable state to the workspace JSON file.
-# Must be called after resolve_workspace_path().
-# Arguments:
-#   $1 - domain
-#######################################
 save_workspace() {
     local domain="$1"
-
-    # Ensure the directory exists.
     mkdir -p "$WORKSPACE_DIR"
 
-    # Determine created_at:
-    #   - preserve the existing value if the file already exists
-    #   - otherwise set to the current ISO-8601 timestamp
     local created_at
     if [[ -f "$WORKSPACE_FILE" ]]; then
         created_at=$(jq -r '.meta.created_at // ""' "$WORKSPACE_FILE")
@@ -349,12 +208,8 @@ save_workspace() {
     local last_run
     last_run=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
-    # Build the document_type_ids JSON object from WS_DOCTYPE_IDS.
-    # Strategy: feed key=value pairs into jq via --args so no shell quoting
-    # issues arise with arbitrary ID strings.
     local doctype_json="{}"
     if [[ ${#WS_DOCTYPE_IDS[@]} -gt 0 ]]; then
-        # Build a flat list: key val key val … for jq --args
         local kv_args=()
         for key in "${!WS_DOCTYPE_IDS[@]}"; do
             kv_args+=("$key" "${WS_DOCTYPE_IDS[$key]}")
@@ -364,7 +219,6 @@ save_workspace() {
         ' --args "${kv_args[@]}")
     fi
 
-    # Write the full workspace JSON atomically via a temp file.
     local tmp_file
     tmp_file=$(mktemp "${WORKSPACE_DIR}/.ws_tmp_XXXXXX")
 
@@ -416,18 +270,7 @@ save_workspace() {
     log "SUCCESS" "Workspace saved: $WORKSPACE_FILE"
 }
 
-#######################################
-# Check whether all required B2B assets are already provisioned.
-# Must be called after load_workspace().
-# Arguments:
-#   $1 - domain (unused here but kept for symmetry with other workspace funcs)
-# Returns:
-#   0 (true)  — all required asset IDs are non-empty
-#   1 (false) — one or more asset IDs are missing
-#######################################
 is_asset_provisioned() {
-    local domain="$1"
-
     if [[ -n "$WS_PARTNER1_INTERNAL_ID"    && \
           -n "$WS_PARTNER2_INTERNAL_ID"    && \
           -n "$WS_CHANNEL_ID"              && \
@@ -441,15 +284,8 @@ is_asset_provisioned() {
     return 1
 }
 
-#######################################
-# Pretty-print the current workspace state to stdout.
-# Must be called after load_workspace().
-# Arguments:
-#   $1 - domain
-#######################################
 print_workspace_status() {
     local domain="$1"
-
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  Workspace Status"
@@ -476,18 +312,14 @@ print_workspace_status() {
         printf "  %-26s %s\n" "Document Type IDs:" "(none)"
     fi
     echo ""
-    printf "  %-26s %s\n" "Run count:"         "$WS_RUN_COUNT"
-    printf "  %-26s %s\n" "ISA control number:""$WS_ISA_CTRL_NUM"
-    printf "  %-26s %s\n" "GS control number:" "$WS_GS_CTRL_NUM"
-
-    # last_run is available in the file but not loaded into a shell var; read
-    # it directly if the file exists so we don't need another global.
+    printf "  %-26s %s\n" "Run count:"          "$WS_RUN_COUNT"
+    printf "  %-26s %s\n" "ISA control number:" "$WS_ISA_CTRL_NUM"
+    printf "  %-26s %s\n" "GS control number:"  "$WS_GS_CTRL_NUM"
     if [[ -f "$WORKSPACE_FILE" ]]; then
         local last_run
         last_run=$(jq -r '.last_run // "(never)"' "$WORKSPACE_FILE")
         printf "  %-26s %s\n" "Last run:" "$last_run"
     fi
-
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 }
@@ -496,29 +328,6 @@ print_workspace_status() {
 # DOMAIN CONFIGURATION
 ################################################################################
 
-# Domain document sequences (ordered for submission) and per-domain partner
-# constants are set by load_domain_config(). The following globals are populated:
-#
-#   DOMAIN_DOC_SEQUENCE      — ordered array of transaction codes  e.g. (840 843 850 …)
-#   DOMAIN_TERMINATOR        — EDI segment terminator  (~  or  !)
-#   DOMAIN_ISA_VERSION       — ISA12 version string    (00401 or 00200)
-#   DOMAIN_P1_NAME           — Partner 1 corporation name
-#   DOMAIN_P1_DUNS           — Partner 1 DUNS identity value
-#   DOMAIN_P1_USERNAME       — Partner 1 channel auth username
-#   DOMAIN_P1_PASSWORD       — Partner 1 channel auth password
-#   DOMAIN_P1_FULLNAME       — Partner 1 user full name
-#   DOMAIN_P2_NAME           — Partner 2 corporation name
-#   DOMAIN_P2_DUNS           — Partner 2 DUNS identity value
-#   DOMAIN_P2_USERNAME       — Partner 2 channel auth username
-#   DOMAIN_P2_PASSWORD       — Partner 2 channel auth password
-#   DOMAIN_P2_FULLNAME       — Partner 2 user full name
-#   DOMAIN_CHANNEL_NAME      — Partner 1 HTTP-IN channel name
-#   DOMAIN_P2_CHANNEL_NAME   — Partner 2 HTTP-IN channel name
-#
-# Values are sourced from demo.env (loaded at startup) — no trace config
-# files are read at runtime.
-
-# Globals declared here so the script never references unbound variables.
 DOMAIN_DOC_SEQUENCE=()
 DOMAIN_TERMINATOR=""
 DOMAIN_ISA_VERSION=""
@@ -537,19 +346,8 @@ DOMAIN_P2_FULLNAME=""
 DOMAIN_CHANNEL_NAME=""
 DOMAIN_P2_CHANNEL_NAME=""
 
-#######################################
-# Load domain-specific configuration into globals.
-# Values for partner names, DUNS IDs, and credentials come from demo.env
-# variables (e.g. RETAIL_P1_NAME). The doc sequence and EDI parameters
-# are fixed per domain and defined inline here.
-# Arguments:
-#   $1 - domain (retail | healthcare | supply_chain)
-# Returns:
-#   0 on success, 1 on unknown domain
-#######################################
 load_domain_config() {
     local domain="$1"
-
     case "$domain" in
         retail)
             DOMAIN_TERMINATOR="~"
@@ -613,22 +411,12 @@ load_domain_config() {
             return 1
             ;;
     esac
-
     log "SUCCESS" "Domain config loaded: $domain (${#DOMAIN_DOC_SEQUENCE[@]} documents, terminator='${DOMAIN_TERMINATOR}')"
     return 0
 }
 
-#######################################
-# Return the WMX12 document-type key for a given transaction code.
-# e.g. txn_to_doctype_key 850  →  WMX12-4010--850---------
-# Arguments:
-#   $1 - transaction code (e.g. 840, 850, 837)
-# Outputs:
-#   Prints the document-type key string
-#######################################
 txn_to_doctype_key() {
     local txn="$1"
-    # Pad txn to 3 digits then build the 24-char WMX12-4010--TXN--------- key
     printf "WMX12-4010--%s---------" "$txn"
 }
 
@@ -636,14 +424,8 @@ txn_to_doctype_key() {
 # ASSET PROVISIONING
 ################################################################################
 
-# MCSP token — fetched once per run by acquire_mcsp_token()
 MCSP_TOKEN=""
 
-#######################################
-# Acquire a fresh MCSP bearer token and store in MCSP_TOKEN.
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 acquire_mcsp_token() {
     log "INFO" "Acquiring MCSP token..."
 
@@ -673,17 +455,6 @@ acquire_mcsp_token() {
     return 0
 }
 
-#######################################
-# Create a partner in B2B.
-# Arguments:
-#   $1 - corporation name
-#   $2 - DUNS identity value
-#   $3 - org unit name (min two words, e.g. "Retail Procurement")
-# Outputs (stdout):
-#   internalId of the created partner
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 create_partner() {
     local corp_name="$1"
     local duns_value="$2"
@@ -738,16 +509,6 @@ create_partner() {
     fi
 }
 
-#######################################
-# Create an HTTP-IN channel and store the result in the appropriate workspace
-# globals based on the requested partner prefix.
-# Arguments:
-#   $1 - channel name
-#   $2 - prefix: "p1" (default) writes to WS_CHANNEL_ID / WS_CHANNEL_ENDPOINT_URI
-#                "p2"           writes to WS_P2_CHANNEL_ID / WS_P2_CHANNEL_ENDPOINT_URI
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 create_channel() {
     local channel_name="$1"
     local prefix="${2:-p1}"
@@ -791,7 +552,7 @@ create_channel() {
 
     if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
         local ch_id ch_uri
-        ch_id=$(echo "$response_body"  | jq -r '.id          // ""')
+        ch_id=$(echo "$response_body"  | jq -r '.id           // ""')
         ch_uri=$(echo "$response_body" | jq -r '.endpoint.uri // ""')
 
         if [[ -z "$ch_id" || "$ch_id" == "null" ]]; then
@@ -819,14 +580,6 @@ create_channel() {
     fi
 }
 
-#######################################
-# Associate an HTTP-IN channel to a partner.
-# Arguments:
-#   $1 - partner internalId
-#   $2 - channel id
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 associate_channel_to_partner() {
     local partner_id="$1"
     local channel_id="$2"
@@ -859,17 +612,6 @@ associate_channel_to_partner() {
     fi
 }
 
-#######################################
-# Create a partner-user.
-# Arguments:
-#   $1 - username
-#   $2 - password
-#   $3 - full name
-# Outputs (stdout):
-#   user id
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 create_partner_user() {
     local username="$1"
     local password="$2"
@@ -914,15 +656,6 @@ create_partner_user() {
     fi
 }
 
-#######################################
-# Associate a user to a partner.
-# Arguments:
-#   $1 - partner internalId
-#   $2 - user id
-#   $3 - username
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 associate_user_to_partner() {
     local partner_id="$1"
     local user_id="$2"
@@ -959,16 +692,6 @@ associate_user_to_partner() {
     fi
 }
 
-#######################################
-# Install a single document type.
-# On conflict (HTTP 409 / "already exists"), falls back to GET to retrieve id.
-# Arguments:
-#   $1 - transaction code  (e.g. 850)
-# Sets:
-#   WS_DOCTYPE_IDS[$1]
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 install_document_type() {
     local txn="$1"
     local doctype_key
@@ -1004,7 +727,6 @@ install_document_type() {
     http_code=$(echo "$response" | tail -n1)
     response_body=$(echo "$response" | sed '$d')
 
-    # 2xx — newly created
     if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
         local doc_id
         doc_id=$(echo "$response_body" | jq -r '.id // ""')
@@ -1017,12 +739,10 @@ install_document_type() {
         return 0
     fi
 
-    # Conflict / already exists — fetch via GET
     local is_conflict=false
     if [[ "$http_code" -eq 409 ]]; then
         is_conflict=true
     else
-        # Some APIs return 400/500 with an "already exists" body
         local lower_body
         lower_body=$(echo "$response_body" | tr '[:upper:]' '[:lower:]')
         if echo "$lower_body" | grep -qE 'already (exists|installed)|duplicate'; then
@@ -1059,19 +779,10 @@ install_document_type() {
     return 1
 }
 
-#######################################
-# Provision all B2B assets for a domain (idempotent).
-# Skips entirely if is_asset_provisioned() returns true.
-# Must be called after load_domain_config() and load_workspace().
-# Arguments:
-#   $1 - domain
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 provision_assets() {
     local domain="$1"
 
-    if is_asset_provisioned "$domain"; then
+    if is_asset_provisioned; then
         log "SUCCESS" "Assets already provisioned for $domain on $B2B_HOST — skipping"
         return 0
     fi
@@ -1079,7 +790,6 @@ provision_assets() {
     log "INFO" "Provisioning assets for domain: $domain on host: $B2B_HOST"
     echo ""
 
-    # ── Partner 1 ────────────────────────────────────────────────────────────
     if [[ -z "$WS_PARTNER1_INTERNAL_ID" ]]; then
         local p1_id
         p1_id=$(create_partner "$DOMAIN_P1_NAME" "$DOMAIN_P1_DUNS" "$DOMAIN_P1_ORG_UNIT") || return 1
@@ -1088,7 +798,6 @@ provision_assets() {
         log "INFO" "Partner 1 already in workspace: $WS_PARTNER1_INTERNAL_ID"
     fi
 
-    # ── Partner 2 ────────────────────────────────────────────────────────────
     if [[ -z "$WS_PARTNER2_INTERNAL_ID" ]]; then
         local p2_id
         p2_id=$(create_partner "$DOMAIN_P2_NAME" "$DOMAIN_P2_DUNS" "$DOMAIN_P2_ORG_UNIT") || return 1
@@ -1097,18 +806,13 @@ provision_assets() {
         log "INFO" "Partner 2 already in workspace: $WS_PARTNER2_INTERNAL_ID"
     fi
 
-    # ── P1 Channel ───────────────────────────────────────────────────────────
     if [[ -z "$WS_CHANNEL_ID" ]]; then
         create_channel "$DOMAIN_CHANNEL_NAME" "p1" || return 1
-        # WS_CHANNEL_ID and WS_CHANNEL_ENDPOINT_URI set inside create_channel()
     else
         log "INFO" "P1 channel already in workspace: $WS_CHANNEL_ID"
     fi
-
-    # Associate P1 channel to Partner 1
     associate_channel_to_partner "$WS_PARTNER1_INTERNAL_ID" "$WS_CHANNEL_ID" || return 1
 
-    # ── P1 Partner User ───────────────────────────────────────────────────────
     if [[ -z "$WS_PARTNER_USER_ID" ]]; then
         local user_id
         user_id=$(create_partner_user \
@@ -1119,28 +823,18 @@ provision_assets() {
     else
         log "INFO" "P1 partner user already in workspace: $WS_PARTNER_USER_ID"
     fi
-
-    # Associate P1 user to Partner 1
     associate_user_to_partner \
         "$WS_PARTNER1_INTERNAL_ID" \
         "$WS_PARTNER_USER_ID" \
         "$DOMAIN_P1_USERNAME" || return 1
 
-    # ── P2 Channel ────────────────────────────────────────────────────────────
-    # Each domain needs a second channel so that documents where P2 is the
-    # ISA06 sender can be submitted with P2's credentials (B2B enforces that
-    # the authenticated user must belong to the same partner as ISA06).
     if [[ -z "$WS_P2_CHANNEL_ID" ]]; then
         create_channel "$DOMAIN_P2_CHANNEL_NAME" "p2" || return 1
-        # WS_P2_CHANNEL_ID and WS_P2_CHANNEL_ENDPOINT_URI set inside create_channel()
     else
         log "INFO" "P2 channel already in workspace: $WS_P2_CHANNEL_ID"
     fi
-
-    # Associate P2 channel to Partner 2
     associate_channel_to_partner "$WS_PARTNER2_INTERNAL_ID" "$WS_P2_CHANNEL_ID" || return 1
 
-    # ── P2 Partner User ───────────────────────────────────────────────────────
     if [[ -z "$WS_P2_PARTNER_USER_ID" ]]; then
         local p2_user_id
         p2_user_id=$(create_partner_user \
@@ -1151,35 +845,30 @@ provision_assets() {
     else
         log "INFO" "P2 partner user already in workspace: $WS_P2_PARTNER_USER_ID"
     fi
-
-    # Associate P2 user to Partner 2
     associate_user_to_partner \
         "$WS_PARTNER2_INTERNAL_ID" \
         "$WS_P2_PARTNER_USER_ID" \
         "$DOMAIN_P2_USERNAME" || return 1
 
-    # ── Document Types ───────────────────────────────────────────────────────
     log "INFO" "Installing document types for domain: $domain"
     for txn in "${DOMAIN_DOC_SEQUENCE[@]}"; do
-        # Skip if already stored in workspace
         if [[ -n "${WS_DOCTYPE_IDS[$txn]:-}" ]]; then
             log "INFO" "Document type $txn already in workspace: ${WS_DOCTYPE_IDS[$txn]}"
             continue
         fi
         install_document_type "$txn" || return 1
-        sleep 0.5   # brief pause between installs to avoid rate-limiting
+        sleep 0.5
     done
 
     log "SUCCESS" "All assets provisioned for domain: $domain"
     return 0
 }
 
+
 ################################################################################
 # TRACE VALUE GENERATION
 ################################################################################
 
-# Per-run linking attribute values — set by generate_trace_values(), consumed
-# by render_template() substitutions.
 TRACE_RFQ_NUMBER=""
 TRACE_QUOTE_NUMBER=""
 TRACE_PO_NUMBER=""
@@ -1187,20 +876,12 @@ TRACE_INVOICE_NUMBER=""
 TRACE_SHIPMENT_ID=""
 TRACE_PAYMENT_REF=""
 TRACE_DELIVERY_DATE=""
-# Healthcare
 TRACE_CLAIM_ID=""
 TRACE_TRN_REF=""
 TRACE_REMITTANCE_TRACE=""
 TRACE_HC_INVOICE_NUMBER=""
-# Supply chain
 TRACE_SC_INVOICE_NUMBER=""
 
-#######################################
-# Generate unique, human-readable linking attribute values for this run.
-# Must be called after load_domain_config() and after WS_RUN_COUNT is loaded.
-# Arguments:
-#   $1 - domain
-#######################################
 generate_trace_values() {
     local domain="$1"
     local date_stamp
@@ -1208,7 +889,6 @@ generate_trace_values() {
     local run_seq
     run_seq=$(printf '%04d' "$WS_RUN_COUNT")
 
-    # Delivery / ship date = today + 14 days (YYYYMMDD)
     TRACE_DELIVERY_DATE=$(date -v+14d +%Y%m%d 2>/dev/null || date -d '+14 days' +%Y%m%d 2>/dev/null || echo "${date_stamp}")
 
     case "$domain" in
@@ -1240,19 +920,6 @@ generate_trace_values() {
 # TEMPLATE RENDERING
 ################################################################################
 
-#######################################
-# Render an EDI template for a given domain + transaction code.
-# Substitutes all {{TOKEN}} placeholders with current run values.
-# Arguments:
-#   $1 - domain
-#   $2 - transaction code (e.g. 840)
-#   $3 - ISA control number (zero-padded 9 digits)
-#   $4 - GS control number
-# Outputs:
-#   Path to rendered temp file (caller must rm -f it)
-# Returns:
-#   0 on success, 1 if template not found
-#######################################
 render_template() {
     local domain="$1"
     local txn="$2"
@@ -1268,24 +935,17 @@ render_template() {
         return 1
     fi
 
-    local current_date
+    local current_date current_time
     current_date=$(date +%Y%m%d)
-    local current_time
     current_time=$(date +%H%M)
 
-    # ISA06/ISA08: DUNS padded to exactly 15 chars (right-padded with spaces).
-    # GS sender/receiver: unpadded bare DUNS value (no trailing spaces).
     local p1_isa p2_isa
     p1_isa=$(printf '%-15s' "${DOMAIN_P1_DUNS:0:15}")
     p2_isa=$(printf '%-15s' "${DOMAIN_P2_DUNS:0:15}")
     local p1_gs="${DOMAIN_P1_DUNS}"
     local p2_gs="${DOMAIN_P2_DUNS}"
 
-    local tmp_file
-    # macOS mktemp does not support a literal suffix after the X placeholders.
-    # Strategy: create a temp file with the X-only pattern, then rename it with
-    # the .edi extension so the file is identifiable during debugging.
-    local tmp_base
+    local tmp_base tmp_file
     tmp_base=$(mktemp "/tmp/b2b_edi_${domain}_${txn}_XXXXXX")
     if [[ -z "$tmp_base" || ! -f "$tmp_base" ]]; then
         log "ERROR" "mktemp failed for $domain/$txn"
@@ -1294,10 +954,6 @@ render_template() {
     tmp_file="${tmp_base}.edi"
     mv "$tmp_base" "$tmp_file"
 
-    # Apply all substitutions using sed; each token on its own -e expression.
-    # P1_ISA/P2_ISA are used in ISA06/ISA08 (15-char padded).
-    # P1_GS/P2_GS  are used in GS02/GS03 and N1 segments (unpadded).
-    # Direction (who is ISA06 vs ISA08) is encoded in each template.
     sed \
         -e "s|{{ISA_CTRL}}|${isa_ctrl}|g" \
         -e "s|{{GS_CTRL}}|${gs_ctrl}|g" \
@@ -1330,32 +986,14 @@ render_template() {
 # DOCUMENT SUBMISSION
 ################################################################################
 
-INTER_DOCUMENT_DELAY=2   # seconds between document POSTs
+INTER_DOCUMENT_DELAY=2
 
-#######################################
-# Post a single rendered EDI file to the correct partner channel.
-#
-# Channel routing (Sub-Task 5):
-#   The B2B server requires that the authenticated user belongs to the same
-#   partner as the ISA06 (EDI sender) DUNS. We inspect ISA06 from the rendered
-#   file and route to P1 channel + P1 creds, or P2 channel + P2 creds.
-#
-# Arguments:
-#   $1 - path to rendered EDI temp file
-#   $2 - transaction code (for logging)
-# Returns:
-#   0 on success, 1 on failure
-#######################################
 post_edi_document() {
     local edi_file="$1"
     local txn="$2"
 
-    # ── ISA06 sender detection ────────────────────────────────────────────────
-    # ISA segment: ISA*QualCode*ID*QualCode*ID*Qual*SENDER_ID(15)*Qual*RCVR*…
-    # Field index (1-based after ISA): 1=ISA01 … 6=ISA06 sender DUNS (15 chars)
     local isa06_raw isa06
     isa06_raw=$(grep -m1 '^ISA' "$edi_file" | cut -d'*' -f7)
-    # Trim trailing spaces used to pad DUNS to 15 chars in ISA field
     isa06=$(echo "$isa06_raw" | sed 's/ *$//')
 
     local channel_uri auth sender_label
@@ -1379,11 +1017,10 @@ post_edi_document() {
     log "INFO" "Routing $txn → sender: $sender_label (ISA06=$isa06)"
 
     if [[ -z "$channel_uri" ]]; then
-        log "ERROR" "Channel endpoint URI is empty for $sender_label — assets may not be fully provisioned. Run with --setup-only first."
+        log "ERROR" "Channel endpoint URI is empty for $sender_label — run --feature setup --domain $domain first."
         return 1
     fi
 
-    # channel_uri may or may not include the scheme
     local url
     if [[ "$channel_uri" == https://* || "$channel_uri" == http://* ]]; then
         url="$channel_uri"
@@ -1403,30 +1040,19 @@ post_edi_document() {
         --data-binary "@${edi_file}" \
         "$url" 2>&1)
 
-    local http_code
+    local http_code response_body
     http_code=$(echo "$response" | tail -n1)
-    local response_body
     response_body=$(echo "$response" | sed '$d')
 
     if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
         log "SUCCESS" "Document $txn submitted (HTTP $http_code)"
         return 0
     else
-        log "ERROR"   "Document $txn failed (HTTP $http_code): $response_body"
+        log "ERROR" "Document $txn failed (HTTP $http_code): $response_body"
         return 1
     fi
 }
 
-#######################################
-# Submit all documents in the domain sequence.
-# Must be called after provision_assets() and generate_trace_values().
-# Arguments:
-#   $1 - domain
-#   $2 - comma-separated subset of txn codes, or empty string for all
-#   $3 - dry_run flag ("true" | "false")
-# Returns:
-#   0 on success, non-zero if any document fails
-#######################################
 submit_document_sequence() {
     local domain="$1"
     local docs_filter="${2:-}"
@@ -1441,7 +1067,6 @@ submit_document_sequence() {
     local failed=0
     local run_log="${WORKSPACE_DIR}/${domain}_runs.log"
 
-    # Build the list of txn codes to submit
     local -a txn_list=()
     if [[ -n "$docs_filter" ]]; then
         IFS=',' read -ra txn_list <<< "$docs_filter"
@@ -1453,7 +1078,6 @@ submit_document_sequence() {
         echo "──────────────────────────────────────────────────────────────"
         log "INFO" "Processing document: $txn  (ISA ctrl: $(printf '%09d' $current_isa))"
 
-        # Render template
         local rendered_file
         rendered_file=$(render_template "$domain" "$txn" "$current_isa" "$current_gs") || {
             log "ERROR" "Skipping $txn — template render failed"
@@ -1471,7 +1095,6 @@ submit_document_sequence() {
         else
             if post_edi_document "$rendered_file" "$txn"; then
                 (( submitted++ )) || true
-                # Log to run log file
                 echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') domain=${domain} txn=${txn} isa=${current_isa} status=SUCCESS" >> "$run_log"
             else
                 (( failed++ )) || true
@@ -1481,12 +1104,10 @@ submit_document_sequence() {
             [[ $txn != "${txn_list[-1]}" ]] && sleep "$INTER_DOCUMENT_DELAY"
         fi
 
-        # Advance control numbers for next document
         (( current_isa++ )) || true
-        (( current_gs++ )) || true
+        (( current_gs++ ))  || true
     done
 
-    # Persist updated control numbers back to workspace globals
     WS_ISA_CTRL_NUM=$current_isa
     WS_GS_CTRL_NUM=$current_gs
 
@@ -1507,79 +1128,86 @@ submit_document_sequence() {
 # CLI INTERFACE
 ################################################################################
 
-#######################################
-# Display usage / help text.
-#######################################
 usage() {
     cat << EOF
 
-${BLUE}B2B Trace Demo Script${NC}
+${BLUE}IBM webMethods B2B Toolkit${NC}
 
-${YELLOW}CONFIGURATION (edit demo.env — never edit this script):${NC}
+${YELLOW}CONFIGURATION (edit toolkit.env — never edit this script):${NC}
   B2B_HOST                  B2B SaaS hostname
   MCSP_INSTANCE_ID          MCSP account UUID
   MCSP_API_KEY              Base64-encoded MCSP API key
   RETAIL_P1_NAME / _DUNS /  Per-domain partner names, DUNS IDs, credentials
-  HEALTHCARE_* / SUPPLY_*   (see demo.env for the full list)
+  HEALTHCARE_* / SUPPLY_*   (see demo.env.example for the full variable list)
 
 ${YELLOW}USAGE:${NC}
-  $0 --domain DOMAIN [OPTIONS]
-  $0 --all-domains [OPTIONS]
+  $0 --feature FEATURE --domain DOMAIN [OPTIONS]
+  $0 --feature FEATURE --all-domains   [OPTIONS]
   $0 --list-domains
   $0 --status DOMAIN
   $0 --reset  DOMAIN
 
-${YELLOW}REQUIRED (one of):${NC}
-  -d, --domain DOMAIN       Target domain: retail | healthcare | supply_chain
-      --all-domains         Run all three domains in sequence
+${YELLOW}FEATURES (--feature):${NC}
+  setup     Provision B2B assets only (partners, channels, users, document
+            types). Idempotent — safe to run multiple times. No documents
+            are submitted. Useful as a standalone provisioning step before
+            any other workflow.
 
-${YELLOW}OPTIONS:${NC}
-  --setup-only              Provision B2B assets only, do not submit documents
+  trace     Full EDI transaction-linking demo. Provisions assets (if not
+            already done) then submits a complete multi-document EDI trace
+            sequence for the chosen domain.
+
+${YELLOW}REQUIRED:${NC}
+  -f, --feature FEATURE     Feature to run: setup | trace
+  -d, --domain  DOMAIN      Target domain:  retail | healthcare | supply_chain
+      --all-domains         Run all three domains in sequence (trace feature)
+
+${YELLOW}OPTIONS (trace feature):${NC}
   --submit-only             Submit documents only (assets must already exist)
   --dry-run                 Render all templates and print them; do not submit
   --docs TXN[,TXN,...]      Submit only the specified transaction codes
                             e.g. --docs 840,843,850
   --delay SECONDS           Pause between document submissions (default: ${INTER_DOCUMENT_DELAY}s)
-  -h, --help                Show this help message
 
-${YELLOW}UTILITY COMMANDS (no --domain required):${NC}
+${YELLOW}UTILITY COMMANDS (no --feature required):${NC}
   --list-domains            List available domains and their workspace status
   --status DOMAIN           Print workspace state for the given domain
   --reset DOMAIN            Clear workspace state for the given domain
+  -h, --help                Show this help message
 
 ${YELLOW}EXAMPLES:${NC}
-  # Full retail trace (provision + submit all 9 documents)
-  $0 --domain retail
+  # Provision B2B assets for retail (partners, channels, doc types)
+  $0 --feature setup --domain retail
 
-  # Run all three domains back-to-back
-  $0 --all-domains
+  # Full retail EDI trace — provision + submit all 9 documents
+  $0 --feature trace --domain retail
 
-  # Healthcare — provision assets only
-  $0 --domain healthcare --setup-only
+  # Healthcare trace — submit only (assets already provisioned)
+  $0 --feature trace --domain healthcare --submit-only
 
-  # Supply chain — dry run (render and print templates, no API calls)
-  $0 --domain supply_chain --dry-run
+  # Supply chain — dry run (print rendered EDI, no API calls)
+  $0 --feature trace --domain supply_chain --dry-run
 
-  # Retail — submit a subset of documents
-  $0 --domain retail --submit-only --docs 840,843,850
+  # Run all three domains back-to-back (trace)
+  $0 --feature trace --all-domains
 
-  # Show workspace state for healthcare on current host
+  # Submit a subset of retail documents
+  $0 --feature trace --domain retail --submit-only --docs 840,843,850
+
+  # Show workspace state for healthcare
   $0 --status healthcare
 
-  # Reset retail workspace (will re-provision on next run)
+  # Reset retail workspace (re-provisions on next run)
   $0 --reset retail
 
-${YELLOW}NOTES:${NC}
-  Workspace files are stored under  .b2b-workspace/<hostname>/<domain>.json
-  The hostname key is derived from B2B_HOST (the config variable), NOT the
-  local machine hostname, so the same script file can target multiple hosts.
+${YELLOW}WORKSPACE:${NC}
+  State files are stored under  .b2b-toolkit/<hostname>/<domain>.json
+  The hostname key is derived from B2B_HOST, so the same toolkit file can
+  target multiple B2B instances without conflict.
 
 EOF
 }
 
-#######################################
-# List all supported domains and their workspace state for the current host.
-#######################################
 list_domains() {
     echo ""
     echo "Available domains on host: ${B2B_HOST}"
@@ -1587,7 +1215,7 @@ list_domains() {
 
     local sanitized_host
     sanitized_host=$(echo "$B2B_HOST" | tr '.' '-' | tr '[:upper:]' '[:lower:]')
-    local ws_root=".b2b-workspace/${sanitized_host}"
+    local ws_root="${WORKSPACE_ROOT}/${sanitized_host}"
 
     for d in retail healthcare supply_chain; do
         local ws_file="${ws_root}/${d}.json"
@@ -1605,11 +1233,6 @@ list_domains() {
     echo ""
 }
 
-#######################################
-# Reset (delete) the workspace state for a domain after confirmation.
-# Arguments:
-#   $1 - domain
-#######################################
 reset_domain() {
     local domain="$1"
     load_domain_config "$domain" || exit 1
@@ -1636,17 +1259,11 @@ reset_domain() {
     echo ""
 }
 
-#######################################
-# Print a run summary.
-# Arguments:
-#   $1 - domain
-#   $2 - mode  (setup-only | submit-only | full | dry-run)
-#   $3 - docs submitted count
-#######################################
 print_run_summary() {
     local domain="$1"
-    local mode="$2"
-    local docs_count="$3"
+    local feature="$2"
+    local mode="$3"
+    local docs_count="$4"
     local ts
     ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
@@ -1654,15 +1271,15 @@ print_run_summary() {
     echo "══════════════════════════════════════════════════════════════"
     echo "  Run Summary"
     echo "══════════════════════════════════════════════════════════════"
-    printf "  %-22s %s\n" "Timestamp:"   "$ts"
-    printf "  %-22s %s\n" "Host:"        "$B2B_HOST"
-    printf "  %-22s %s\n" "Domain:"      "$domain"
-    printf "  %-22s %s\n" "Mode:"        "$mode"
-    printf "  %-22s %s\n" "Run count:"   "$WS_RUN_COUNT"
+    printf "  %-22s %s\n" "Timestamp:"     "$ts"
+    printf "  %-22s %s\n" "Host:"          "$B2B_HOST"
+    printf "  %-22s %s\n" "Feature:"       "$feature"
+    printf "  %-22s %s\n" "Domain:"        "$domain"
+    printf "  %-22s %s\n" "Mode:"          "$mode"
+    printf "  %-22s %s\n" "Run count:"     "$WS_RUN_COUNT"
     printf "  %-22s %s\n" "Docs targeted:" "$docs_count"
-    printf "  %-22s %s\n" "Workspace:"   "$WORKSPACE_FILE"
+    printf "  %-22s %s\n" "Workspace:"     "$WORKSPACE_FILE"
 
-    # Print the trace values that were used (non-empty ones only)
     local trace_summary=""
     [[ -n "$TRACE_RFQ_NUMBER"        ]] && trace_summary+="    RFQNumber:         $TRACE_RFQ_NUMBER\n"
     [[ -n "$TRACE_QUOTE_NUMBER"      ]] && trace_summary+="    QuoteNumber:       $TRACE_QUOTE_NUMBER\n"
@@ -1684,6 +1301,107 @@ print_run_summary() {
 }
 
 ################################################################################
+# FEATURE: setup
+# Provision B2B assets for a domain — idempotent, no document submission.
+################################################################################
+
+run_feature_setup() {
+    local domain="$1"
+
+    log "INFO" "Feature: setup | Domain: $domain"
+
+    load_domain_config "$domain" || exit 1
+    resolve_workspace_path "$domain"
+    load_workspace "$domain"
+    acquire_mcsp_token || exit 1
+
+    provision_assets "$domain" || exit 1
+    save_workspace "$domain"
+
+    print_run_summary "$domain" "setup" "provision-only" "0"
+    echo ""
+    log "SUCCESS" "Setup complete for domain: $domain on $B2B_HOST"
+}
+
+################################################################################
+# FEATURE: trace
+# Provision assets (if needed) then submit a full EDI trace sequence.
+################################################################################
+
+run_feature_trace() {
+    local domain="$1"
+    local mode="$2"
+    local docs_filter="$3"
+    local all_domains="$4"
+
+    # ── --all-domains: re-invoke per domain for clean state isolation ─────────
+    if [[ "$all_domains" == true ]]; then
+        log "INFO" "Running all domains: retail → healthcare → supply_chain"
+        local _overall_exit=0
+        for _d in retail healthcare supply_chain; do
+            echo ""
+            echo "████████████████████████████████████████████████████████████"
+            echo "  Feature: trace | Domain: $_d"
+            echo "████████████████████████████████████████████████████████████"
+            local _args=("--feature" "trace" "--domain" "$_d")
+            [[ "$mode" != "full" ]]     && _args+=("--${mode}")
+            [[ -n "$docs_filter" ]]     && _args+=("--docs" "$docs_filter")
+            [[ "$INTER_DOCUMENT_DELAY" != "2" ]] && _args+=("--delay" "$INTER_DOCUMENT_DELAY")
+            bash "${BASH_SOURCE[0]}" "${_args[@]}" || _overall_exit=$?
+        done
+        exit $_overall_exit
+    fi
+
+    log "INFO" "Feature: trace | Domain: $domain | Mode: $mode"
+
+    load_domain_config "$domain" || exit 1
+    resolve_workspace_path "$domain"
+    load_workspace "$domain"
+
+    if [[ "$mode" != "dry-run" ]]; then
+        acquire_mcsp_token || exit 1
+    fi
+
+    local -a target_docs=()
+    if [[ -n "$docs_filter" ]]; then
+        IFS=',' read -ra target_docs <<< "$docs_filter"
+    else
+        target_docs=("${DOMAIN_DOC_SEQUENCE[@]}")
+    fi
+
+    # Provision unless submit-only or dry-run
+    if [[ "$mode" == "full" || "$mode" == "submit-only" ]]; then
+        if [[ "$mode" == "full" ]]; then
+            provision_assets "$domain" || exit 1
+            save_workspace "$domain"
+        fi
+    fi
+
+    if [[ "$mode" == "submit-only" ]]; then
+        if ! is_asset_provisioned; then
+            log "ERROR" "Assets not provisioned for $domain. Run --feature setup --domain $domain first."
+            exit 1
+        fi
+    fi
+
+    (( WS_RUN_COUNT++ )) || true
+    generate_trace_values "$domain"
+
+    local dry_run_flag="false"
+    [[ "$mode" == "dry-run" ]] && dry_run_flag="true"
+
+    submit_document_sequence "$domain" "$docs_filter" "$dry_run_flag"
+    local submit_exit=$?
+
+    if [[ "$dry_run_flag" != "true" ]]; then
+        save_workspace "$domain"
+    fi
+
+    print_run_summary "$domain" "trace" "$mode" "${#target_docs[@]}"
+    exit $submit_exit
+}
+
+################################################################################
 # MAIN
 ################################################################################
 
@@ -1694,21 +1412,21 @@ main() {
         exit 1
     fi
 
-    # ── Parse arguments ───────────────────────────────────────────────────────
+    local feature=""
     local domain=""
-    local mode="full"        # full | setup-only | submit-only | dry-run
+    local mode="full"
     local docs_filter=""
-    local cmd=""             # list-domains | status | reset
+    local cmd=""
     local all_domains=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            -f|--feature)
+                feature="$2"; shift 2 ;;
             -d|--domain)
                 domain="$2"; shift 2 ;;
             --all-domains)
                 all_domains=true; shift ;;
-            --setup-only)
-                mode="setup-only"; shift ;;
             --submit-only)
                 mode="submit-only"; shift ;;
             --dry-run)
@@ -1731,7 +1449,7 @@ main() {
         esac
     done
 
-    # ── Utility commands that don't need --domain ─────────────────────────────
+    # ── Utility commands (no --feature required) ──────────────────────────────
     if [[ "$cmd" == "list-domains" ]]; then
         list_domains
         exit 0
@@ -1752,80 +1470,32 @@ main() {
         exit 0
     fi
 
-    # ── --all-domains: run all three domains sequentially ─────────────────────
-    if [[ "$all_domains" == true ]]; then
-        log "INFO" "Running all domains: retail → healthcare → supply_chain"
-        local _overall_exit=0
-        for _d in retail healthcare supply_chain; do
-            echo ""
-            echo "████████████████████████████████████████████████████████████"
-            echo "  Domain: $_d"
-            echo "████████████████████████████████████████████████████████████"
-            # Re-invoke this script for each domain so workspace state is
-            # cleanly isolated per domain, passing through mode and delay.
-            local _args=("--domain" "$_d")
-            [[ "$mode" != "full" ]] && _args+=("--${mode}")
-            [[ -n "$docs_filter" ]] && _args+=("--docs" "$docs_filter")
-            [[ "$INTER_DOCUMENT_DELAY" != "2" ]] && _args+=("--delay" "$INTER_DOCUMENT_DELAY")
-            bash "${BASH_SOURCE[0]}" "${_args[@]}" || _overall_exit=$?
-        done
-        exit $_overall_exit
-    fi
-
-    # ── Domain is required for all other modes ────────────────────────────────
-    if [[ -z "$domain" ]]; then
-        log "ERROR" "--domain (or --all-domains) is required. Use --help for usage."
+    # ── Feature is required for all other invocations ─────────────────────────
+    if [[ -z "$feature" ]]; then
+        log "ERROR" "--feature is required. Valid features: setup | trace"
         usage
         exit 1
     fi
 
-    # ── Load domain config + workspace ───────────────────────────────────────
-    load_domain_config "$domain" || exit 1
-    resolve_workspace_path "$domain"
-    load_workspace "$domain"
-
-    # ── Acquire MCSP token (needed for provisioning and submit) ───────────────
-    if [[ "$mode" != "dry-run" ]]; then
-        acquire_mcsp_token || exit 1
-    fi
-
-    # ── Determine doc count for summary ──────────────────────────────────────
-    local -a target_docs=()
-    if [[ -n "$docs_filter" ]]; then
-        IFS=',' read -ra target_docs <<< "$docs_filter"
-    else
-        target_docs=("${DOMAIN_DOC_SEQUENCE[@]}")
-    fi
-
-    # ── Asset provisioning ────────────────────────────────────────────────────
-    if [[ "$mode" == "full" || "$mode" == "setup-only" ]]; then
-        provision_assets "$domain" || exit 1
-        save_workspace "$domain"
-    fi
-
-    if [[ "$mode" == "setup-only" ]]; then
-        print_run_summary "$domain" "setup-only" "0"
-        exit 0
-    fi
-
-    # ── Generate trace values for this run ────────────────────────────────────
-    (( WS_RUN_COUNT++ )) || true
-    generate_trace_values "$domain"
-
-    # ── Submit document sequence ──────────────────────────────────────────────
-    local dry_run_flag="false"
-    [[ "$mode" == "dry-run" ]] && dry_run_flag="true"
-
-    submit_document_sequence "$domain" "$docs_filter" "$dry_run_flag"
-    local submit_exit=$?
-
-    # ── Persist updated counters ──────────────────────────────────────────────
-    if [[ "$dry_run_flag" != "true" ]]; then
-        save_workspace "$domain"
-    fi
-
-    print_run_summary "$domain" "$mode" "${#target_docs[@]}"
-    exit $submit_exit
+    case "$feature" in
+        setup)
+            [[ -z "$domain" ]] && { log "ERROR" "--feature setup requires --domain"; usage; exit 1; }
+            run_feature_setup "$domain"
+            ;;
+        trace)
+            if [[ "$all_domains" == false && -z "$domain" ]]; then
+                log "ERROR" "--feature trace requires --domain (or --all-domains)"
+                usage
+                exit 1
+            fi
+            run_feature_trace "$domain" "$mode" "$docs_filter" "$all_domains"
+            ;;
+        *)
+            log "ERROR" "Unknown feature: '$feature'. Valid features: setup | trace"
+            usage
+            exit 1
+            ;;
+    esac
 }
 
 ################################################################################

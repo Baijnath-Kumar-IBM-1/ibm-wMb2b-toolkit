@@ -1,6 +1,8 @@
-.b2b-workspace/
+# Toolkit workspace — provisioned asset state, run logs, control numbers
+.b2b-toolkit/
 
-# B2B demo environment config — contains credentials
+# Environment config — contains credentials, never commit
+toolkit.env
 demo.env
 
 # macOS metadata
