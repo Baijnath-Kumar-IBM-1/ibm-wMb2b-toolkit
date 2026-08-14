@@ -1358,10 +1358,6 @@ run_feature_trace() {
     resolve_workspace_path "$domain"
     load_workspace "$domain"
 
-    if [[ "$mode" != "dry-run" ]]; then
-        acquire_mcsp_token || exit 1
-    fi
-
     local -a target_docs=()
     if [[ -n "$docs_filter" ]]; then
         IFS=',' read -ra target_docs <<< "$docs_filter"
@@ -1369,12 +1365,12 @@ run_feature_trace() {
         target_docs=("${DOMAIN_DOC_SEQUENCE[@]}")
     fi
 
-    # Provision unless submit-only or dry-run
-    if [[ "$mode" == "full" || "$mode" == "submit-only" ]]; then
-        if [[ "$mode" == "full" ]]; then
-            provision_assets "$domain" || exit 1
-            save_workspace "$domain"
-        fi
+    # MCSP token is only needed for provisioning (B2B management API calls).
+    # Document submission uses partner-user Basic Auth directly — no token needed.
+    if [[ "$mode" == "full" ]]; then
+        acquire_mcsp_token || exit 1
+        provision_assets "$domain" || exit 1
+        save_workspace "$domain"
     fi
 
     if [[ "$mode" == "submit-only" ]]; then
