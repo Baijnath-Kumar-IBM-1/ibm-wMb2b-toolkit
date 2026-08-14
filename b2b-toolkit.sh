@@ -429,7 +429,7 @@ MCSP_TOKEN=""
 acquire_mcsp_token() {
     log "INFO" "Acquiring MCSP token..."
 
-    local token_url="https://account-iam.platform.test.saas.ibm.com/api/2.0/services/${MCSP_INSTANCE_ID}/apikeys/token?includeBuiltinActions=false&includeCustomActions=false&includeRoles=true&prefixRolesWithDefinitionScope=false"
+    local token_url="https://${MCSP_IAM_HOST}/api/2.0/services/${MCSP_INSTANCE_ID}/apikeys/token?includeBuiltinActions=false&includeCustomActions=false&includeRoles=true&prefixRolesWithDefinitionScope=false"
 
     local response
     response=$(curl -s \
