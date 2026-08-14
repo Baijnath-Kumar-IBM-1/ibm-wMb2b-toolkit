@@ -58,7 +58,78 @@ Open `toolkit.env` in any text editor and set:
 | `SUPPLY_CHAIN_*` | Supply chain domain partner identity and credentials |
 
 > `toolkit.env` is in `.gitignore` — it will never be committed accidentally.
-> The safe-to-commit template is `demo.env.example`.
+> The safe-to-commit template is `toolkit.env.example`.
+
+---
+
+## Obtaining MCSP Credentials
+
+The toolkit authenticates against IBM webMethods B2B SaaS via the **Multi-Cloud
+Service Platform (MCSP)** IAM layer. You need two values: the **Instance ID**
+and an **API Key**. Both are obtained from the IBM SaaS Console.
+
+### Step 1 — Find your Instance ID (`MCSP_INSTANCE_ID`)
+
+1. Sign in to the **IBM SaaS Console**:
+   `https://console.saas.ibm.com`
+2. From the top navigation, open **My IBM** → **My instances**.
+3. Locate your **webMethods B2B** service instance.
+4. Click the instance name to open its detail page.
+5. Copy the **Instance ID** (a UUID in the format
+   `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
+
+This value maps to `MCSP_INSTANCE_ID` in `toolkit.env`.
+
+> **Tip**: the Instance ID also appears in the URL of the B2B Admin Console —
+> it is the UUID segment after `/instances/`.
+
+---
+
+### Step 2 — Generate an API Key (`MCSP_API_KEY`)
+
+API keys are managed per-instance in the SaaS Console.
+
+1. From the instance detail page (Step 1), click the **Access** tab (or
+   **API Keys** in the left sidebar, depending on console version).
+2. Click **Generate API key** (or **Create API key**).
+3. Give the key a descriptive name, e.g. `b2b-toolkit-local`.
+4. Set the **scope** to the instance you identified in Step 1.
+5. Click **Generate**.
+6. **Copy the key immediately** — it is shown only once.
+7. Base64-encode the key before pasting it into `toolkit.env`:
+
+   ```bash
+   # macOS / Linux — pipe the raw key and copy the output
+   echo -n "YOUR_RAW_API_KEY" | base64
+   ```
+
+   Paste the resulting base64 string as the value of `MCSP_API_KEY`.
+
+> **Security note**: treat the API key like a password. Store it only in
+> `toolkit.env` (which is `.gitignore`d) and never commit or share it.
+
+---
+
+### Step 3 — Find your B2B Host (`B2B_HOST`)
+
+1. In the IBM SaaS Console, open your B2B instance.
+2. Click **Launch** (or **Open console**) to open the B2B Admin UI.
+3. The hostname in your browser's address bar is your `B2B_HOST` value —
+   the part between `https://` and the first `/`, for example:
+   ```
+   dev2205134-m-yqb-c1.b2b.ipaas.ibm.com
+   ```
+4. Paste this hostname (without `https://`) into `toolkit.env`.
+
+---
+
+### Summary — `toolkit.env` values from MCSP
+
+| Variable | Where to find it |
+|----------|-----------------|
+| `B2B_HOST` | Browser address bar when the B2B Admin Console is open |
+| `MCSP_INSTANCE_ID` | IBM SaaS Console → My instances → Instance detail page |
+| `MCSP_API_KEY` | IBM SaaS Console → Instance → Access → Generate API key (base64-encoded) |
 
 ---
 
