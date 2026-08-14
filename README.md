@@ -71,11 +71,11 @@ and an **API Key**. Both are obtained from the IBM SaaS Console.
 ### Step 1 — Find your Instance ID (`MCSP_INSTANCE_ID`)
 
 1. Sign in to the **IBM SaaS Console**:
-   `https://console.saas.ibm.com`
-2. From the top navigation, open **My IBM** → **My instances**.
-3. Locate your **webMethods B2B** service instance.
-4. Click the instance name to open its detail page.
-5. Copy the **Instance ID** (a UUID in the format
+   `https://aws.console.saas.ibm.com`
+2. Select your right **SaaS Account**
+3. In account page select right **Subscription** of **IBM webMethods Hybrid Integration** and click **View instances**
+4. In the subscription page click on correct **Instance**
+5. Copy the **Instance ID** from **Instance details** tab (a UUID in the format
    `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
 
 This value maps to `MCSP_INSTANCE_ID` in `toolkit.env`.
@@ -95,15 +95,8 @@ API keys are managed per-instance in the SaaS Console.
 3. Give the key a descriptive name, e.g. `b2b-toolkit-local`.
 4. Set the **scope** to the instance you identified in Step 1.
 5. Click **Generate**.
-6. **Copy the key immediately** — it is shown only once.
-7. Base64-encode the key before pasting it into `toolkit.env`:
+6. **Copy the key immediately** — it is shown only once and paste in toolkit.env.
 
-   ```bash
-   # macOS / Linux — pipe the raw key and copy the output
-   echo -n "YOUR_RAW_API_KEY" | base64
-   ```
-
-   Paste the resulting base64 string as the value of `MCSP_API_KEY`.
 
 > **Security note**: treat the API key like a password. Store it only in
 > `toolkit.env` (which is `.gitignore`d) and never commit or share it.
@@ -112,8 +105,9 @@ API keys are managed per-instance in the SaaS Console.
 
 ### Step 3 — Find your B2B Host (`B2B_HOST`)
 
-1. In the IBM SaaS Console, open your B2B instance.
-2. Click **Launch** (or **Open console**) to open the B2B Admin UI.
+1. In the IBM SaaS Console, open your **IBM webMethods Hybrid Integration** instance.
+2. Click **Open** (or **Open Instance**) to open the IBM webMethods Hybrid Integration UI.
+3. From IBM webMethods Hybrid Integration left naviagtion panel or from capability section click on ** webMethods B2B Integration**
 3. The hostname in your browser's address bar is your `B2B_HOST` value —
    the part between `https://` and the first `/`, for example:
    ```
@@ -129,7 +123,7 @@ API keys are managed per-instance in the SaaS Console.
 |----------|-----------------|
 | `B2B_HOST` | Browser address bar when the B2B Admin Console is open |
 | `MCSP_INSTANCE_ID` | IBM SaaS Console → My instances → Instance detail page |
-| `MCSP_API_KEY` | IBM SaaS Console → Instance → Access → Generate API key (base64-encoded) |
+| `MCSP_API_KEY` | IBM SaaS Console → Instance → Access → Generate API key (copy and paste as-is) |
 
 ---
 
