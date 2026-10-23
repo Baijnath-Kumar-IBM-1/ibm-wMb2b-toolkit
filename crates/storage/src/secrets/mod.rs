@@ -102,7 +102,7 @@ mod tests {
         let (store, backend) = open_secret_store(
             dir.path(),
             SecretBackendPolicy::EncryptedFile,
-            Some(&pass("a long passphrase")),
+            Some(&pass("<your-passphrase>")),
         )
         .unwrap();
         assert_eq!(backend, SecretBackend::EncryptedFile);

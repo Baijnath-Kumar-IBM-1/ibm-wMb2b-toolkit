@@ -148,11 +148,11 @@ mod tests {
     #[test]
     fn debug_never_prints_header_values_or_body() {
         let req = HttpRequest::new(Method::Post, "https://h/x", Duration::from_secs(1))
-            .header("Authorization", "Bearer super-secret-token")
-            .body(b"password=hunter2".to_vec());
+            .header("Authorization", "Bearer <your-token>")
+            .body(b"password=<your-password>".to_vec());
         let shown = format!("{req:?}");
-        assert!(!shown.contains("super-secret-token"));
-        assert!(!shown.contains("hunter2"));
+        assert!(!shown.contains("<your-token>"));
+        assert!(!shown.contains("<your-password>"));
         assert!(shown.contains("Authorization"));
     }
 }
