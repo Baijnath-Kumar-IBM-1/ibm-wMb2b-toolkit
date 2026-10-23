@@ -1,0 +1,56 @@
+# Supply chain pack — X12 004010
+[pack]
+id = "supply_chain"
+label = "Supply Chain"
+standard = "X12"
+version = "004010"
+terminator = "!"
+isa_version = "00200"
+
+[trace_rules]
+SHIPMENT_ID        = "SCL-{date}-{seq}"
+SC_INVOICE_NUMBER  = "SCINV-{date}-{seq}"
+
+# Document sequence mirrors DOMAIN_DOC_SEQUENCE in the v1 script (branch `v1-bash`).
+
+[[documents]]
+code = "204"
+name = "Motor Carrier Load Tender"
+note = "Load tender from shipper (P1) to carrier (P2)"
+template = "templates/204.edi"
+sender = "p1"
+
+[[documents]]
+code = "990"
+name = "Response to a Load Tender"
+note = "Load tender response from carrier (P2) to shipper (P1)"
+template = "templates/990.edi"
+sender = "p2"
+
+[[documents]]
+code = "211"
+name = "Bill of Lading"
+note = "Bill of lading from carrier (P2) to shipper (P1)"
+template = "templates/211.edi"
+sender = "p2"
+
+[[documents]]
+code = "214"
+name = "Transportation Carrier Shipment Status Message"
+note = "Shipment status from carrier (P2) to shipper (P1)"
+template = "templates/214.edi"
+sender = "p2"
+
+[[documents]]
+code = "210"
+name = "Motor Carrier Freight Details and Invoice"
+note = "Freight invoice from carrier (P2) to shipper (P1)"
+template = "templates/210.edi"
+sender = "p2"
+
+[[documents]]
+code = "820"
+name = "Payment Order / Remittance Advice"
+note = "Payment from shipper (P1) to carrier (P2)"
+template = "templates/820.edi"
+sender = "p1"

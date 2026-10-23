@@ -1,0 +1,33 @@
+[package]
+name = "trace-desktop"
+description = "Toolkit v2 desktop app: the local server and UI in a Tauri window."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+# Separate workspace: building it needs the platform webview toolkit
+# (WebKitGTK on Linux), which the main workspace and its CI must not require.
+[workspace]
+
+[lib]
+name = "trace_desktop_lib"
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.6", default-features = false, features = ["wry", "compression", "common-controls-v6", "x11"] }
+trace-server = { path = "../../../crates/server", features = ["embed-ui"] }
+secrecy = "0.10.3"
+serde_json = "1.0.154"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

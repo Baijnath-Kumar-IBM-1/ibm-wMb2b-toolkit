@@ -1,0 +1,14 @@
+{
+  "name": "trace-api-gen",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Generates src/api/schema.d.ts from docs/api/openapi.yaml. Has its own TypeScript 6 because openapi-typescript needs the JS compiler API that TypeScript 7 no longer has.",
+  "type": "module",
+  "scripts": {
+    "gen": "openapi-typescript ../../../docs/api/openapi.yaml -o ../../src/api/schema.d.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "6.0.3"
+  }
+}

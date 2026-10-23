@@ -7,3 +7,22 @@ demo.env
 
 # macOS metadata
 .DS_Store
+
+# Rust build output
+target/
+
+# UI dependencies and build output
+node_modules/
+ui/dist/
+
+# v2 local data and secrets
+*.sqlite
+*.sqlite-journal
+*.db
+.env
+.env.*
+!.env.example
+
+# Tauri generated schemas and local tool output
+apps/desktop/src-tauri/gen/
+.playwright-mcp/

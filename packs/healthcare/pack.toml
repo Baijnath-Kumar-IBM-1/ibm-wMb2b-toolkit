@@ -1,0 +1,51 @@
+# Healthcare pack — X12 004010
+[pack]
+id = "healthcare"
+label = "Healthcare"
+standard = "X12"
+version = "004010"
+terminator = "!"
+isa_version = "00200"
+
+[trace_rules]
+CLAIM_ID           = "CLM-{date}-{seq}"
+TRN_REF            = "TRN-{date}-{seq}"
+REMITTANCE_TRACE   = "RMT-{date}-{seq}"
+HC_INVOICE_NUMBER  = "HCINV-{date}-{seq}"
+
+# Document sequence mirrors DOMAIN_DOC_SEQUENCE in the v1 script (branch `v1-bash`).
+
+[[documents]]
+code = "837"
+name = "Health Care Claim"
+note = "Claim from provider (P1) to payer (P2)"
+template = "templates/837.edi"
+sender = "p1"
+
+[[documents]]
+code = "275"
+name = "Patient Information"
+note = "Clinical attachment from provider (P1) to payer (P2)"
+template = "templates/275.edi"
+sender = "p1"
+
+[[documents]]
+code = "277"
+name = "Health Care Information Status Notification"
+note = "Claim status response from payer (P2) to provider (P1)"
+template = "templates/277.edi"
+sender = "p2"
+
+[[documents]]
+code = "835"
+name = "Health Care Claim Payment / Advice"
+note = "Remittance advice from payer (P2) to provider (P1)"
+template = "templates/835.edi"
+sender = "p2"
+
+[[documents]]
+code = "820"
+name = "Payment Order / Remittance Advice"
+note = "Payment from payer (P2) to provider (P1)"
+template = "templates/820.edi"
+sender = "p2"

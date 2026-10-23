@@ -1,0 +1,694 @@
+openapi: 3.0.3
+info:
+  title: Toolkit v2 local API
+  version: 0.1.0
+  description: |
+    Served by `trace-server` on 127.0.0.1 only. Every `/api` route needs
+    `Authorization: Bearer <token>`; the token is never accepted in a URL.
+    Secrets (API key, partner password) are write-only: requests carry them,
+    responses only carry `has_api_key` / `has_password`.
+    Long operations answer `202` with a `run_id`; follow them with
+    `GET /runs/{id}` and the `/events` stream.
+    The UI client is generated from this file (`pnpm gen:api` in `ui/`).
+servers:
+  - url: /api
+security:
+  - bearer: []
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Server status and active secret backend
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /events:
+    get:
+      operationId: streamEvents
+      summary: Server-sent events (`event`, `lagged`); read with fetch to send the bearer header
+      responses:
+        "200":
+          description: text/event-stream; each `event` data is an Event
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /runs/{id}:
+    get:
+      operationId: getRun
+      parameters: [{ $ref: "#/components/parameters/RunId" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "404": { $ref: "#/components/responses/Error" }
+  /runs/{id}/cancel:
+    post:
+      operationId: cancelRun
+      parameters: [{ $ref: "#/components/parameters/RunId" }]
+      responses:
+        "202": { description: Cancellation requested }
+        "404": { $ref: "#/components/responses/Error" }
+  /environments:
+    get:
+      operationId: listEnvironments
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Environment" }
+    post:
+      operationId: createEnvironment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnvironmentCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Environment" }
+        "422": { $ref: "#/components/responses/Error" }
+  /environments/{id}:
+    get:
+      operationId: getEnvironment
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Environment" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateEnvironment
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnvironmentUpdate" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Environment" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteEnvironment
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "204": { description: Deleted with its partners and secrets }
+        "404": { $ref: "#/components/responses/Error" }
+  /environments/{id}/default:
+    post:
+      operationId: setDefaultEnvironment
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "204": { description: OK }
+        "404": { $ref: "#/components/responses/Error" }
+  /environments/{id}/test:
+    post:
+      operationId: testConnection
+      summary: Requests a fresh token with the saved API key
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: ok=false carries a user-safe reason
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectionReport" }
+        "404": { $ref: "#/components/responses/Error" }
+  /environments/{id}/partners:
+    get:
+      operationId: listPartners
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Partner" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPartner
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Partner" }
+        "422": { $ref: "#/components/responses/Error" }
+  /partners/{id}:
+    get:
+      operationId: getPartner
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Partner" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updatePartner
+      summary: Only before any provisioning step succeeded (409 afterwards)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerUpdate" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Partner" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deletePartner
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error" }
+  /partners/{id}/provisioning:
+    get:
+      operationId: getProvisioning
+      summary: Saved provisioning state; contacts nothing
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Provisioning" }
+        "404": { $ref: "#/components/responses/Error" }
+  /partners/{id}/provision:
+    post:
+      operationId: provisionPartner
+      summary: Starts or resumes provisioning; run report is a StepRunReport
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "202": { $ref: "#/components/responses/RunStarted" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /environments/{id}/documents:
+    get:
+      operationId: listInstalledDocuments
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InstalledDocument" }
+        "404": { $ref: "#/components/responses/Error" }
+  /environments/{id}/documents/install:
+    post:
+      operationId: installDocuments
+      summary: Installs document types; run report is an InstallReport
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstallRequest" }
+      responses:
+        "202": { $ref: "#/components/responses/RunStarted" }
+        "409": { $ref: "#/components/responses/Error" }
+  /packs:
+    get:
+      operationId: listPacks
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Pack" }
+  /preview:
+    post:
+      operationId: previewDocuments
+      summary: Renders documents without sending or consuming control numbers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PreviewRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PreviewReport" }
+        "422": { $ref: "#/components/responses/Error" }
+  /submit:
+    post:
+      operationId: submitDocuments
+      summary: Starts a submission; run report is a SubmitReport. One per environment at a time
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubmitRequest" }
+      responses:
+        "202": { $ref: "#/components/responses/RunStarted" }
+        "409": { $ref: "#/components/responses/Error" }
+  /environments/{id}/submissions:
+    get:
+      operationId: listSubmissions
+      summary: Newest first, without payloads
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SubmissionSummary" }
+        "404": { $ref: "#/components/responses/Error" }
+  /environments/{id}/counters:
+    get:
+      operationId: getCounters
+      summary: Next control numbers and run count
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Counters" }
+        "404": { $ref: "#/components/responses/Error" }
+  /submissions/{id}:
+    get:
+      operationId: getSubmission
+      summary: One submission including its EDI payload
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Submission" }
+        "404": { $ref: "#/components/responses/Error" }
+  /preferences:
+    get:
+      operationId: getPreferences
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+    put:
+      operationId: updatePreferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Preferences" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+        "422": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: Error with a user-safe message
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    RunStarted:
+      description: Accepted
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [run_id]
+            properties:
+              run_id: { type: string }
+  schemas:
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        fields:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+    Health:
+      type: object
+      required: [status, version, secret_backend]
+      properties:
+        status: { type: string }
+        version: { type: string }
+        secret_backend: { type: string, enum: [keychain, encrypted_file] }
+    Event:
+      type: object
+      required: [at, level, kind, message, data]
+      properties:
+        at: { type: string, format: date-time }
+        level: { type: string, enum: [info, warn, error] }
+        kind: { type: string }
+        message: { type: string }
+        data: {}
+    Run:
+      type: object
+      required: [id, kind, status, started_at]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        status: { type: string, enum: [running, finished, failed] }
+        started_at: { type: string, format: date-time }
+        report:
+          nullable: true
+          description: |
+            Depends on `kind`: `partner.provision` is a StepRunReport,
+            `documents.install` an InstallReport, `submission` a SubmitReport.
+          oneOf:
+            - { $ref: "#/components/schemas/StepRunReport" }
+            - { $ref: "#/components/schemas/InstallReport" }
+            - { $ref: "#/components/schemas/SubmitReport" }
+        error:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/ApiError" }]
+    StepRunReport:
+      type: object
+      required: [steps, cancelled]
+      properties:
+        cancelled: { type: boolean }
+        steps:
+          type: array
+          items:
+            type: object
+            required: [name, outcome]
+            properties:
+              name: { type: string }
+              outcome: { type: string, enum: [skipped, succeeded, failed, notrun] }
+              error: { type: string, nullable: true }
+    InstallReport:
+      type: object
+      required: [documents, cancelled]
+      properties:
+        cancelled: { type: boolean }
+        documents:
+          type: array
+          items:
+            type: object
+            required: [transaction_code, outcome]
+            properties:
+              transaction_code: { type: string }
+              outcome: { type: string, enum: [installed, already_existed, already_installed, failed, not_run] }
+              document_type_id: { type: string, nullable: true }
+              error: { type: string, nullable: true }
+    SubmitReport:
+      type: object
+      required: [run_count, trace_values, documents, cancelled]
+      properties:
+        run_count: { type: integer }
+        cancelled: { type: boolean }
+        trace_values: { type: object, additionalProperties: { type: string } }
+        documents:
+          type: array
+          items:
+            type: object
+            required: [transaction_code, outcome]
+            properties:
+              transaction_code: { type: string }
+              outcome: { type: string, enum: [submitted, failed, not_run] }
+              isa_control: { type: integer, nullable: true }
+              gs_control: { type: integer, nullable: true }
+              http_status: { type: integer, nullable: true }
+              error: { type: string, nullable: true }
+              submission_id: { type: string, nullable: true }
+              duration_ms: { type: integer, nullable: true }
+    Environment:
+      type: object
+      required: [id, name, b2b_host, instance_id, iam_host, is_default, has_api_key, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        b2b_host: { type: string }
+        instance_id: { type: string, format: uuid }
+        iam_host: { type: string }
+        ca_bundle_path: { type: string, nullable: true }
+        is_default: { type: boolean }
+        has_api_key: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    EnvironmentInput:
+      type: object
+      required: [name, b2b_host, instance_id]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        b2b_host: { type: string }
+        instance_id: { type: string, format: uuid }
+        iam_host: { type: string, description: Defaults to the test IAM host }
+        ca_bundle_path: { type: string, nullable: true, description: Absolute path to a PEM bundle }
+    EnvironmentCreate:
+      allOf:
+        - { $ref: "#/components/schemas/EnvironmentInput" }
+        - type: object
+          required: [api_key]
+          properties:
+            api_key: { type: string, format: password, writeOnly: true }
+    EnvironmentUpdate:
+      allOf:
+        - { $ref: "#/components/schemas/EnvironmentInput" }
+        - type: object
+          properties:
+            api_key: { type: string, format: password, writeOnly: true, description: Omit to keep the stored key }
+    ConnectionReport:
+      type: object
+      required: [ok, message]
+      properties:
+        ok: { type: boolean }
+        message: { type: string }
+    Partner:
+      type: object
+      required: [id, environment_id, name, org_unit, id_type, id_value, username, full_name, channel_name, has_password, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        environment_id: { type: string, format: uuid }
+        name: { type: string }
+        org_unit: { type: string }
+        id_type: { type: string, enum: [duns] }
+        id_value: { type: string }
+        username: { type: string }
+        full_name: { type: string }
+        channel_name: { type: string }
+        has_password: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PartnerInput:
+      type: object
+      required: [name, org_unit, id_value, username, full_name, channel_name]
+      properties:
+        name: { type: string }
+        org_unit: { type: string }
+        id_type: { type: string, enum: [duns], default: duns }
+        id_value: { type: string, description: DUNS, 9 to 15 digits }
+        username: { type: string }
+        full_name: { type: string }
+        channel_name: { type: string }
+    PartnerCreate:
+      allOf:
+        - { $ref: "#/components/schemas/PartnerInput" }
+        - type: object
+          required: [password]
+          properties:
+            password: { type: string, format: password, writeOnly: true, minLength: 8, maxLength: 128 }
+    PartnerUpdate:
+      allOf:
+        - { $ref: "#/components/schemas/PartnerInput" }
+        - type: object
+          properties:
+            password: { type: string, format: password, writeOnly: true, description: Omit to keep the stored password }
+    Provisioning:
+      type: object
+      required: [partner_id, steps, complete]
+      properties:
+        partner_id: { type: string, format: uuid }
+        complete: { type: boolean }
+        steps:
+          type: array
+          items:
+            type: object
+            required: [name, status]
+            properties:
+              name: { type: string }
+              status: { type: string, enum: [pending, succeeded, failed] }
+              error: { type: string, nullable: true }
+              updated_at: { type: string, format: date-time, nullable: true }
+        partner_internal_id: { type: string, nullable: true }
+        channel_id: { type: string, nullable: true }
+        channel_endpoint_uri: { type: string, nullable: true }
+        user_id: { type: string, nullable: true }
+    InstalledDocument:
+      type: object
+      required: [transaction_code, document_type_id, installed_at]
+      properties:
+        transaction_code: { type: string }
+        document_type_id: { type: string }
+        installed_at: { type: string, format: date-time }
+    InstallRequest:
+      type: object
+      required: [pack_id]
+      properties:
+        pack_id: { type: string }
+        codes: { type: array, nullable: true, items: { type: string } }
+    Pack:
+      type: object
+      required: [id, label, standard, version, documents]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        standard: { type: string }
+        version: { type: string }
+        documents:
+          type: array
+          items:
+            type: object
+            required: [code, name, note, sender]
+            properties:
+              code: { type: string }
+              name: { type: string }
+              note: { type: string }
+              sender: { type: string, enum: [p1, p2] }
+    Party:
+      oneOf:
+        - type: object
+          required: [type, partner_id]
+          properties:
+            type: { type: string, enum: [saved] }
+            partner_id: { type: string, format: uuid }
+        - type: object
+          required: [type, id_value]
+          properties:
+            type: { type: string, enum: [manual] }
+            id_value: { type: string, description: DUNS, generation only }
+      discriminator: { propertyName: type }
+    PreviewRequest:
+      type: object
+      required: [environment_id, pack_id, p1, p2]
+      properties:
+        environment_id: { type: string, format: uuid }
+        pack_id: { type: string }
+        codes: { type: array, nullable: true, items: { type: string } }
+        p1: { $ref: "#/components/schemas/Party" }
+        p2: { $ref: "#/components/schemas/Party" }
+        trace_overrides: { type: object, additionalProperties: { type: string } }
+    PreviewReport:
+      type: object
+      required: [run_count, trace_values, documents]
+      properties:
+        run_count: { type: integer }
+        trace_values: { type: object, additionalProperties: { type: string } }
+        documents:
+          type: array
+          items:
+            type: object
+            required: [transaction_code, name, sender, isa_control, gs_control, payload]
+            properties:
+              transaction_code: { type: string }
+              name: { type: string }
+              sender: { type: string, enum: [p1, p2] }
+              isa_control: { type: integer }
+              gs_control: { type: integer }
+              payload: { type: string }
+    SubmitRequest:
+      type: object
+      required: [environment_id, pack_id, p1_partner_id, p2_partner_id]
+      properties:
+        environment_id: { type: string, format: uuid }
+        pack_id: { type: string }
+        codes: { type: array, nullable: true, items: { type: string } }
+        p1_partner_id: { type: string, format: uuid }
+        p2_partner_id: { type: string, format: uuid }
+        trace_overrides: { type: object, additionalProperties: { type: string } }
+    SubmissionSummary:
+      type: object
+      required: [id, environment_id, submitted_at, domain, transaction_code, isa_control, gs_control, result, trace_values, has_payload]
+      properties:
+        id: { type: string, format: uuid }
+        environment_id: { type: string, format: uuid }
+        submitted_at: { type: string, format: date-time }
+        domain: { type: string }
+        transaction_code: { type: string }
+        sender_partner_id: { type: string, nullable: true }
+        receiver_partner_id: { type: string, nullable: true }
+        isa_control: { type: integer }
+        gs_control: { type: integer }
+        http_status: { type: integer, nullable: true }
+        result: { type: string, enum: [success, failed, generated] }
+        trace_values: { type: object, additionalProperties: true }
+        response_excerpt: { type: string, nullable: true }
+        duration_ms: { type: integer, nullable: true }
+        has_payload: { type: boolean }
+    Submission:
+      allOf:
+        - { $ref: "#/components/schemas/SubmissionSummary" }
+        - type: object
+          properties:
+            payload: { type: string, nullable: true }
+    Counters:
+      type: object
+      required: [isa_next, gs_next, run_count]
+      properties:
+        isa_next: { type: integer }
+        gs_next: { type: integer }
+        run_count: { type: integer }
+    Preferences:
+      type: object
+      properties:
+        inter_document_delay_secs: { type: integer, minimum: 0, maximum: 300, default: 2 }
+        request_timeout_secs: { type: integer, minimum: 1, maximum: 600, default: 30 }
+        payload_timeout_secs: { type: integer, minimum: 1, maximum: 1800, default: 120 }

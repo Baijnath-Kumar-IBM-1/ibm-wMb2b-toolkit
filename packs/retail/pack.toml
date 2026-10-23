@@ -1,0 +1,85 @@
+# Retail pack — X12 004010
+[pack]
+id = "retail"
+label = "Retail"
+standard = "X12"
+version = "004010"
+terminator = "~"
+isa_version = "00401"
+
+[trace_rules]
+# Each key matches the {{VAR}} placeholder in templates.
+# Patterns may reference {date} (YYYYMMDD) and {seq} (zero-padded run count).
+RFQ_NUMBER     = "RFQ-{date}-{seq}"
+QUOTE_NUMBER   = "QUOTE-{date}-{seq}"
+PO_NUMBER      = "PO-{date}-{seq}"
+INVOICE_NUMBER = "INV-{date}-{seq}"
+SHIPMENT_ID    = "SHIP-{date}-{seq}"
+PAYMENT_REF    = "PAY-{date}-{seq}"
+
+# Document sequence mirrors DOMAIN_DOC_SEQUENCE in the v1 script (branch `v1-bash`).
+# sender = "p1" → ISA06 is P1, ISA08 is P2 (ISA starts with P1_ISA).
+# sender = "p2" → ISA06 is P2, ISA08 is P1 (ISA starts with P2_ISA).
+
+[[documents]]
+code = "840"
+name = "Request for Quotation"
+note = "RFQ from buyer (P2) to supplier (P1)"
+template = "templates/840.edi"
+sender = "p2"
+
+[[documents]]
+code = "843"
+name = "Response to Request for Quotation"
+note = "Quote response from supplier (P2) to buyer (P1)"
+template = "templates/843.edi"
+sender = "p2"
+
+[[documents]]
+code = "850"
+name = "Purchase Order"
+note = "Purchase order from buyer (P1) to supplier (P2)"
+template = "templates/850.edi"
+sender = "p1"
+
+[[documents]]
+code = "855"
+name = "Purchase Order Acknowledgment"
+note = "Acknowledgment from supplier (P2) to buyer (P1)"
+template = "templates/855.edi"
+sender = "p2"
+
+[[documents]]
+code = "860"
+name = "Purchase Order Change Request"
+note = "Order change from buyer (P1) to supplier (P2)"
+template = "templates/860.edi"
+sender = "p1"
+
+[[documents]]
+code = "865"
+name = "Purchase Order Change Acknowledgment"
+note = "Change ack from supplier (P2) to buyer (P1)"
+template = "templates/865.edi"
+sender = "p2"
+
+[[documents]]
+code = "856"
+name = "Ship Notice/Manifest"
+note = "Advance ship notice from supplier (P2) to buyer (P1)"
+template = "templates/856.edi"
+sender = "p2"
+
+[[documents]]
+code = "810"
+name = "Invoice"
+note = "Invoice from supplier (P2) to buyer (P1)"
+template = "templates/810.edi"
+sender = "p2"
+
+[[documents]]
+code = "820"
+name = "Payment Order / Remittance Advice"
+note = "Payment remittance from buyer (P1) to supplier (P2)"
+template = "templates/820.edi"
+sender = "p1"
