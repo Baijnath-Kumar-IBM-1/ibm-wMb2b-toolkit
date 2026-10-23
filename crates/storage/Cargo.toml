@@ -1,0 +1,31 @@
+[package]
+name = "trace-storage"
+description = "Toolkit v2 storage: SQLite repositories, migrations and keychain secret store."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+trace-core = { path = "../core" }
+aes-gcm.workspace = true
+argon2.workspace = true
+base64.workspace = true
+getrandom.workspace = true
+keyring.workspace = true
+keyring-core.workspace = true
+rusqlite.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+trace-core = { path = "../core", features = ["testing"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

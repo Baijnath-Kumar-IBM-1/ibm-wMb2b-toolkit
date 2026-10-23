@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly run so new advisories surface even without code changes.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  ui:
+    name: UI (typecheck, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Generated API client matches docs/api/openapi.yaml
+        run: pnpm check:api
+      - run: pnpm typecheck
+      - run: pnpm build
+
+  desktop:
+    name: Desktop app (clippy, test)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      # The desktop crate embeds ui/dist, so the UI must be built first.
+      - run: pnpm install --frozen-lockfile && pnpm build
+        working-directory: ui
+      - run: cargo fmt --check
+        working-directory: apps/desktop/src-tauri
+      - run: cargo clippy --all-targets --locked -- -D warnings
+        working-directory: apps/desktop/src-tauri
+      - run: cargo test --locked
+        working-directory: apps/desktop/src-tauri
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      # The desktop crate is its own workspace, so the action above does not
+      # see its lock file. Audit it explicitly.
+      - name: Audit the desktop app lock file
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --file apps/desktop/src-tauri/Cargo.lock
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Audit UI dependencies
+        working-directory: ui
+        run: pnpm audit --audit-level=moderate

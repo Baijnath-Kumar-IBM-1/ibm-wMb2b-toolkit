@@ -1,334 +1,111 @@
-# IBM webMethods B2B Toolkit
+> **Looking for the bash script?** The original `b2b-toolkit.sh` (v1) is no
+> longer in `main`. It is kept on the `v1-bash` branch
+> (`git checkout v1-bash`). v2 does not read `toolkit.env` or the
+> `.b2b-toolkit/` workspace; re-enter environments in the UI.
 
-A single-script toolkit for IBM webMethods B2B SaaS. Use `--feature` to select
-the capability you need. All configuration lives in `toolkit.env` — the script
-itself is never edited.
+# IBM webMethods B2B Toolkit v2
 
-Designed for PM, Sales, and Marketing demos of B2B SaaS capabilities including
-partner provisioning and multi-document EDI transaction tracing.
+Initialise an IBM webMethods B2B SaaS environment, generate sample EDI
+documents and submit linked multi-document traces for demos. It runs as a
+**web app** (a local server you open in a browser) or as a **desktop app**
+(Tauri). Both use the same Rust core and the same UI (IBM Carbon).
 
----
+> Everything runs on your machine. The server listens on `127.0.0.1` only and
+> every request needs a per-launch token. API keys and partner passwords are
+> kept in the OS keychain, never in files or logs.
 
-## Features
+| | |
+|---|---|
+| `crates/core` | Domain logic: environments, partners, packs, setup and submit runs (no I/O) |
+| `crates/storage` | SQLite storage and the secret store (keychain, or encrypted file) |
+| `crates/http` | HTTP client for the B2B and MCSP APIs |
+| `crates/server` | `trace-server`: local HTTP API, events and UI hosting |
+| `ui/` | React + Carbon UI |
+| `apps/desktop/src-tauri` | Tauri desktop shell (its own Cargo workspace) |
+| `packs/` | Built-in domain packs: retail, healthcare (X12 004010), supply chain |
 
-| `--feature` | What it does |
-|-------------|--------------|
-| `setup` | Provisions B2B assets for a domain — trading partners, HTTP-IN channels, partner users, and EDI document types. Idempotent: safe to run multiple times against the same instance. |
-| `trace` | Provisions assets (if not already done) then submits a complete, linked multi-document EDI trace sequence for the chosen domain. |
+## Install
 
----
+Download a build from the GitHub releases page, or build it yourself below.
+Release builds are **not code-signed or notarised**:
 
-## Prerequisites
+- **macOS:** open the `.dmg`, drag Trace to Applications. On first launch,
+  right-click the app and choose Open, or allow it in System Settings →
+  Privacy & Security.
+- **Windows:** run the installer; SmartScreen may warn about an unknown publisher.
+- **Linux:** needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu).
+  Install the `.deb`, or make the `.AppImage` executable and run it.
+- **Standalone server:** `trace-server-<os>` from the same release; see below.
 
-| Tool | Version | Install |
-|------|---------|---------|
-| `bash` | ≥ 4.0 | macOS: `brew install bash` · Linux: built-in |
-| `curl` | any | macOS: `brew install curl` · Linux: `apt/yum install curl` |
-| `jq` | ≥ 1.6 | macOS: `brew install jq` · Linux: `apt/yum install jq` |
+Check each download against `SHA256SUMS.txt` on the release.
 
-> **macOS users**: the system `bash` is version 3. Install bash 5 via Homebrew:
-> ```bash
-> brew install bash
-> # Then run the script with the newer bash:
-> /opt/homebrew/opt/bash/bin/bash b2b-toolkit.sh --feature setup --domain retail
-> ```
-> Or update your PATH so `/opt/homebrew/opt/bash/bin` comes first.
+## Use it
 
----
+1. **Environments** — add the B2B host, MCSP instance ID and API key, then
+   *Test connection*. For a tenant with a private CA, attach a CA bundle to the
+   environment; TLS validation is never turned off.
+2. **Setup** — add a pair of trading partners (DUNS IDs) for a domain, then
+   *Provision* each partner. Provisioning creates the partner, channel and user
+   on the tenant step by step, and can be retried or resumed.
+3. **Documents** — pick a domain and install its document types on the tenant.
+4. **Message studio** — choose the saved partner pair, preview the generated
+   EDI (nothing is sent), then submit one document or the full trace sequence.
+5. **Activity** — review stored submissions, filter, open the payload and
+   response, and export CSV or JSON (newest 1000 rows).
+6. **Overview** — setup progress and counts for the selected environment.
 
-## Configuration
+### Run the server in a browser
 
-**Never edit `b2b-toolkit.sh`** — all configuration lives in `toolkit.env`.
-
-```bash
-# One-time setup: copy the example file and fill in your values
-cp toolkit.env.example toolkit.env
-# Now edit toolkit.env with your B2B instance details
+```sh
+cd ui && pnpm install --frozen-lockfile && pnpm build && cd ..
+cargo run --release -p trace-server --features embed-ui
 ```
 
-Open `toolkit.env` in any text editor and set:
+It prints `http://127.0.0.1:<port>/#token=...`; open that URL. Without
+`--features embed-ui`, pass `--ui-dir ui/dist`. If the machine has no OS
+keychain, set `TRACE_SECRETS_PASSPHRASE` to use the encrypted-file store.
+Options and the security model are in [`docs/server.md`](docs/server.md).
 
-| Variable | Description |
-|----------|-------------|
-| `B2B_HOST` | Hostname of the IBM webMethods B2B SaaS instance |
-| `MCSP_INSTANCE_ID` | MCSP account UUID (from the IBM Cloud console) |
-| `MCSP_API_KEY` | Base64-encoded MCSP API key |
-| `RETAIL_P1_NAME` / `RETAIL_P1_DUNS` / `RETAIL_P1_PASSWORD` … | Retail domain partner identity and credentials |
-| `HEALTHCARE_*` | Healthcare domain partner identity and credentials |
-| `SUPPLY_CHAIN_*` | Supply chain domain partner identity and credentials |
+### Run the desktop app
 
-> `toolkit.env` is in `.gitignore` — it will never be committed accidentally.
-> The safe-to-commit template is `toolkit.env.example`.
-
----
-
-## Obtaining MCSP Credentials
-
-The toolkit authenticates against IBM webMethods B2B SaaS via the **Multi-Cloud
-Service Platform (MCSP)** IAM layer. You need two values: the **Instance ID**
-and an **API Key**. Both are obtained from the IBM SaaS Console.
-
-### Step 1 — Find your Instance ID (`MCSP_INSTANCE_ID`)
-
-1. Sign in to the **IBM SaaS Console**:
-   `https://aws.console.saas.ibm.com`
-2. Select your right **SaaS Account**
-3. In account page select right **Subscription** of **IBM webMethods Hybrid Integration** and click **View instances**
-4. In the subscription page click on correct **Instance**
-5. Copy the **Instance ID** from **Instance details** tab (a UUID in the format
-   `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
-
-This value maps to `MCSP_INSTANCE_ID` in `toolkit.env`.
-
-> **Tip**: the Instance ID also appears in the URL of the B2B Admin Console —
-> it is the UUID segment after `/instances/`.
-
----
-
-### Step 2 — Generate an API Key (`MCSP_API_KEY`)
-
-API keys are managed per-instance in the SaaS Console.
-
-1. From the instance detail page (Step 1), click the **Access** tab (or
-   **API Keys** in the left sidebar, depending on console version).
-2. Click **Generate API key** (or **Create API key**).
-3. Give the key a descriptive name, e.g. `b2b-toolkit-local`.
-4. Set the **scope** to the instance you identified in Step 1.
-5. Click **Generate**.
-6. **Copy the key immediately** — it is shown only once and paste in toolkit.env.
-
-
-> **Security note**: treat the API key like a password. Store it only in
-> `toolkit.env` (which is `.gitignore`d) and never commit or share it.
-
----
-
-### Step 3 — Find your B2B Host (`B2B_HOST`)
-
-1. In the IBM SaaS Console, open your **IBM webMethods Hybrid Integration** instance.
-2. Click **Open** (or **Open Instance**) to open the IBM webMethods Hybrid Integration UI.
-3. From IBM webMethods Hybrid Integration left naviagtion panel or from capability section click on ** webMethods B2B Integration**
-3. The hostname in your browser's address bar is your `B2B_HOST` value —
-   the part between `https://` and the first `/`, for example:
-   ```
-   dev2205134-m-yqb-c1.b2b.ipaas.ibm.com
-   ```
-4. Paste this hostname (without `https://`) into `toolkit.env`.
-
----
-
-### Summary — `toolkit.env` values from MCSP
-
-| Variable | Where to find it |
-|----------|-----------------|
-| `B2B_HOST` | Browser address bar when the B2B Admin Console is open |
-| `MCSP_INSTANCE_ID` | IBM SaaS Console → My instances → Instance detail page |
-| `MCSP_API_KEY` | IBM SaaS Console → Instance → Access → Generate API key (copy and paste as-is) |
-
----
-
-## Quick Start
-
-```bash
-# Make executable (once)
-chmod +x b2b-toolkit.sh
-
-# ── feature: setup ─────────────────────────────────────────────────────────
-# Provision all B2B assets for a domain (partners, channels, doc types)
-./b2b-toolkit.sh --feature setup --domain retail
-./b2b-toolkit.sh --feature setup --domain healthcare
-./b2b-toolkit.sh --feature setup --domain supply_chain
-
-# ── feature: trace ─────────────────────────────────────────────────────────
-# Full retail EDI trace — provision assets (if needed) + submit 9 documents
-./b2b-toolkit.sh --feature trace --domain retail
-
-# Full healthcare trace
-./b2b-toolkit.sh --feature trace --domain healthcare
-
-# Full supply chain trace
-./b2b-toolkit.sh --feature trace --domain supply_chain
-
-# Run all three trace domains back-to-back
-./b2b-toolkit.sh --feature trace --all-domains
+```sh
+cd ui && pnpm install --frozen-lockfile && cd ..
+cd apps/desktop && ../../ui/node_modules/.bin/tauri dev      # development
+cd apps/desktop && ../../ui/node_modules/.bin/tauri build    # installers
 ```
 
----
+`tauri build` runs the UI build itself. Bundles are written to
+`apps/desktop/src-tauri/target/release/bundle/`. On Linux, install first:
+`build-essential libwebkit2gtk-4.1-dev libxdo-dev libssl-dev librsvg2-dev pkg-config`.
 
-## Feature Reference
+Data (database, user packs) lives in the per-user app-data directory
+(`~/Library/Application Support/com.ibm.trace.toolkit` on macOS).
 
-### `--feature setup`
+## Add a domain or document set (packs)
 
-Provisions all B2B assets required for a domain:
-1. Creates two trading partners with domain-specific DUNS identities
-2. Creates HTTP-IN channels and associates them to each partner
-3. Creates partner users and associates them to their partners
-4. Installs all required EDI document types for the domain
+A pack is a folder with a `pack.toml` and EDI templates, like those in
+[`packs/`](packs). Copy one to `<data dir>/packs/<name>/`, edit it and restart.
+A pack with the same `id` as a built-in one replaces it; a broken pack is
+skipped and a warning is logged (for example, a document whose template file
+is missing). An unknown `{{PLACEHOLDER}}` is reported when the document is
+rendered.
 
-The operation is **idempotent** — re-running it on an already-provisioned
-domain is safe and skips work that was already completed.
+## Add a feature
 
-```bash
-./b2b-toolkit.sh --feature setup --domain retail
-./b2b-toolkit.sh --feature setup --domain healthcare
-./b2b-toolkit.sh --feature setup --domain supply_chain
+Features follow one layout: a core module, a storage implementation, an HTTP
+router and a screen registered in `ui/src/shell/registry.ts`. See
+[`docs/adding-a-feature.md`](docs/adding-a-feature.md) and
+[`docs/server.md`](docs/server.md). The API contract is
+`docs/api/openapi.yaml`; the UI client is generated from it
+(`pnpm check:api` fails if they drift).
+
+## Develop and check
+
+```sh
+cargo fmt --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cd ui && pnpm install --frozen-lockfile && pnpm check:api && pnpm typecheck && pnpm build && pnpm audit --audit-level=moderate
+# desktop crate (needs ui/dist built first)
+cd apps/desktop/src-tauri && cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked
 ```
-
----
-
-### `--feature trace`
-
-Submits a complete linked EDI document sequence to demonstrate B2B transaction
-tracing. Automatically provisions assets first if they are not present.
-
-```bash
-# Full trace (provision if needed + submit all documents)
-./b2b-toolkit.sh --feature trace --domain retail
-
-# Submit only (assets already provisioned via --feature setup)
-./b2b-toolkit.sh --feature trace --domain retail --submit-only
-
-# Dry run — render and print all EDI templates, no API calls
-./b2b-toolkit.sh --feature trace --domain retail --dry-run
-
-# Submit only specific transaction codes
-./b2b-toolkit.sh --feature trace --domain retail --submit-only --docs 840,843,850
-
-# Custom delay between document submissions (default: 2 seconds)
-./b2b-toolkit.sh --feature trace --domain retail --delay 5
-
-# Run all three domains in sequence
-./b2b-toolkit.sh --feature trace --all-domains
-
-# All domains — dry run
-./b2b-toolkit.sh --feature trace --all-domains --dry-run
-```
-
----
-
-## Domain Descriptions
-
-### Retail (`--domain retail`)
-Simulates a full retail procurement cycle between **AcmeIndustries** (buyer)
-and **PreferredSupplier** (supplier):
-
-```
-840 RFQ → 843 Quote Response → 850 Purchase Order → 855 PO Ack
-       → 860 PO Change → 865 PO Change Ack → 856 Advance Ship Notice
-       → 810 Invoice → 820 Payment
-```
-
-**Linking attributes**: `RFQNumber` · `PONumber` · `InvoiceNumber`
-
----
-
-### Healthcare (`--domain healthcare`)
-Simulates a healthcare claims processing flow between **HealthcarePayer**
-and **HealthcareProvider**:
-
-```
-837 Claim → 275 Claim Attachments → 277 Claim Status → 835 Remittance → 820 Payment
-```
-
-**Linking attributes**: `ClaimID` · `TRN_Ref` · `RemittanceTrace`
-
----
-
-### Supply Chain (`--domain supply_chain`)
-Simulates a motor carrier load tender flow between **SCL-Shipper**
-and **SCL-Carrier**:
-
-```
-204 Load Tender → 990 Response → 211 Bill of Lading → 214 Shipment Status
-              → 210 Freight Invoice → 820 Payment
-```
-
-**Linking attributes**: `ShipmentID` · `SCInvoiceNumber`
-
----
-
-## All Commands
-
-```bash
-# Provision assets for a domain
-./b2b-toolkit.sh --feature setup --domain retail
-
-# Full trace (provision + submit all documents)
-./b2b-toolkit.sh --feature trace --domain retail
-
-# Submit documents only (assets must already be provisioned)
-./b2b-toolkit.sh --feature trace --domain retail --submit-only
-
-# Dry run — render and print all EDI templates, no API calls
-./b2b-toolkit.sh --feature trace --domain retail --dry-run
-
-# Submit only specific transaction codes
-./b2b-toolkit.sh --feature trace --domain retail --submit-only --docs 840,843,850
-
-# Custom delay between document submissions (default: 2 seconds)
-./b2b-toolkit.sh --feature trace --domain retail --delay 5
-
-# Run all three domains in sequence
-./b2b-toolkit.sh --feature trace --all-domains
-
-# All domains — dry run
-./b2b-toolkit.sh --feature trace --all-domains --dry-run
-
-# List all domains and their workspace status for the current B2B host
-./b2b-toolkit.sh --list-domains
-
-# Show full workspace state for a domain
-./b2b-toolkit.sh --status retail
-
-# Reset workspace for a domain (re-provisions from scratch on next run)
-./b2b-toolkit.sh --reset retail
-```
-
----
-
-## Workspace Files
-
-The toolkit tracks all provisioned asset IDs, run counters, and control numbers
-in a workspace directory scoped to the B2B host:
-
-```
-.b2b-toolkit/
-  dev2205134-m-yqb-c1-b2b-ipaas-dev/    ← sanitized from B2B_HOST
-    retail.json
-    retail_runs.log
-    healthcare.json
-    healthcare_runs.log
-    supply_chain.json
-    supply_chain_runs.log
-```
-
-The workspace files are **excluded from git** (see `.gitignore`). Each file
-records the hostname and MCSP instance it was created for, so the file is
-self-describing if you need to inspect it manually.
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| `jq: command not found` | Install jq: `brew install jq` or `apt install jq` |
-| `declare -A: invalid option` | You are using bash 3 (macOS default). Install bash 4+: `brew install bash` |
-| `Token request failed` | Check `MCSP_API_KEY` and `MCSP_INSTANCE_ID` in `toolkit.env` |
-| `Document type already installed` | Normal — the script fetches the existing ID via GET and continues |
-| `HTTP 401 on document POST` | Partner user credentials may be wrong. Run `--reset <domain>` and re-provision |
-| Assets were already created manually | Run `--status <domain>` to check state, or `--reset <domain>` to start fresh |
-| Want to submit a second trace | Just run `./b2b-toolkit.sh --feature trace --domain retail` again — a new unique trace will be submitted |
-| macOS `declare -A: invalid option` | System bash is v3. Run: `brew install bash` then use `/opt/homebrew/opt/bash/bin/bash b2b-toolkit.sh ...` |
-
----
-
-## Partner Identities Per Domain
-
-| Domain | Partner 1 | DUNS | Partner 2 | DUNS |
-|--------|-----------|------|-----------|------|
-| retail | AcmeIndustries | 777888900 | PreferredSupplier | 777444100 |
-| healthcare | HealthcarePayer | 9012345330000 | HealthcareProvider | 9088877440000 |
-| supply_chain | SCL-Shipper | 8811223344000 | SCL-Carrier | 8899776655000 |
-
-All DUNS IDs are globally unique across domains to prevent identity conflicts.
