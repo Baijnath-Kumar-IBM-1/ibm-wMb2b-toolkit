@@ -359,7 +359,7 @@ impl SubmissionRepository for MemoryDb {
             .filter(|s| &s.environment_id == environment_id)
             .cloned()
             .collect();
-        v.sort_by(|a, b| b.submitted_at.cmp(&a.submitted_at));
+        v.sort_by_key(|a| std::cmp::Reverse(a.submitted_at));
         v.truncate(limit as usize);
         Ok(v)
     }
